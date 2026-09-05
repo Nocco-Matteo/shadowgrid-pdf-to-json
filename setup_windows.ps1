@@ -15,19 +15,15 @@ Write-Host ""
 # 1. WSL2 + Ubuntu
 Write-Host "[1/3] Verifica WSL2 + Ubuntu-22.04..." -ForegroundColor Yellow
 $needReboot = $false
-try {
-    $wslList = wsl --list --verbose 2>$null
-    if ($wslList -notmatch "Ubuntu-22.04") {
-        Write-Host "  Ubuntu-22.04 non trovato, installo..." -ForegroundColor Yellow
-        wsl --install -d Ubuntu-22.04
-        $needReboot = $true
-    } else {
-        Write-Host "  Ubuntu-22.04 presente." -ForegroundColor Green
-    }
-} catch {
-    Write-Host "  WSL non attivo. Abilito WSL..." -ForegroundColor Yellow
-    wsl --install --no-distribution
+
+# wsl --list ritorna UTF-16; prova direttamente a lanciare un comando
+$ubuntuUser = wsl -d Ubuntu-22.04 -- whoami 2>$null
+if (-not $ubuntuUser) {
+    Write-Host "  Ubuntu-22.04 non trovato, installo..." -ForegroundColor Yellow
+    wsl --install -d Ubuntu-22.04
     $needReboot = $true
+} else {
+    Write-Host "  Ubuntu-22.04 presente (user: $ubuntuUser)" -ForegroundColor Green
 }
 
 if ($needReboot) {
@@ -36,14 +32,6 @@ if ($needReboot) {
     Write-Host "  Al riavvio ripartira da qui automaticamente." -ForegroundColor Yellow
     exit 0
 }
-
-# Verifica accesso Ubuntu
-$ubuntuUser = wsl -d Ubuntu-22.04 -- whoami 2>$null
-if (-not $ubuntuUser) {
-    Write-Host "  ERRORE: Ubuntu-22.04 non raggiungibile. Riavvia e riprova." -ForegroundColor Red
-    exit 1
-}
-Write-Host "  Ubuntu OK (user: $ubuntuUser)" -ForegroundColor Green
 
 # 2. GPU
 Write-Host ""
