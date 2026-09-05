@@ -1,0 +1,1282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexus-vtt.local/compendium.schema.json",
+  "title": "Shadow Grid — compendium curated definitions",
+  "description": "JSON Schema dei dati estratti e curati dal compendium D&D 5e. Copre ogni file seed in backend/api/data/seeds/. La sorgente di verità a runtime sono gli schema Zod in backend/api/src/modules/rules/schemas/*.ts; questo schema ne è la proiezione JSON Schema (Draft 2020-12). Un file seed qualunque valida contro la radice (oneOf degli envelope). Le $defs condivise (sources, effect taxonomy, byLevel, ...) sono riutilizzabili dai singoli envelope.",
+  "$comment": "Generato leggendo i seed e gli schema Zod. Non modificare a mano i contratti runtime: se uno Zod cambia, rigenerare questo schema. Le chiusure (enum chiusi di effect kind, condition, weaponFilter, damageType, activation, resetOn, category) sono volute: ogni membro deve avere un consumer a runtime (vedi .agents/skills/rulemaster/references/effect-taxonomy.md).",
+
+  "$defs": {
+    "sourceCode": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Codice di un sourcebook, snake_case. Deve essere uno dei `code` in sources.json. La membership è validata a runtime da assertKnownSourceCodes, non qui (dipendenza circolare con sources.json)."
+    },
+    "sourceCodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sourceCode" },
+      "minItems": 1,
+      "description": "Quali sourcebook pubblicano la regola. Lista perché le ristampe sono la norma (Bladesinging è in Sword Coast e Tasha's)."
+    },
+
+    "ability": {
+      "type": "string",
+      "enum": ["str", "dex", "con", "int", "wis", "cha"],
+      "description": "Chiave ability a tre lettere, lowercase."
+    },
+
+    "levelKey": {
+      "type": "string",
+      "pattern": "^([1-9]|1[0-9]|20)$",
+      "description": "Livello 1-20 come stringa (le chiavi JSON sono stringhe)."
+    },
+
+    "diceExpression": {
+      "type": "string",
+      "pattern": "^\\d+d\\d+(\\s*[+-]\\s*\\d+)?$",
+      "description": "Espressione dadi: 8d6, 1d8+3, 2d10-1."
+    },
+
+    "damageAmount": {
+      "type": "string",
+      "pattern": "^(\\d+d\\d+(\\s*[+-]\\s*\\d+)?|\\d+)$",
+      "description": "Danni come dadi (2d8, 1d10+2) O numero piatto (4). Per featureAction damage/tempHp, che includono ladder piatte (Storm Herald desert aura: 2 -> 3)."
+    },
+
+    "dieFaces": {
+      "type": "integer",
+      "enum": [4, 6, 8, 10, 12],
+      "description": "Facce di un dado (4 per d4, 12 per d12)."
+    },
+
+    "dieFacesWith20": {
+      "type": "integer",
+      "enum": [4, 6, 8, 10, 12, 20],
+      "description": "Facce di un dato incluse d20 (per resource dieByLevel, es. Bardic Inspiration d20 al 15°)."
+    },
+
+    "byLevelNumber": {
+      "type": "object",
+      "patternProperties": {
+        "^([1-9]|1[0-9]|20)$": { "type": "integer" }
+      },
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Mappa livello->numero, semantica 'effective from this level onward': un livello assente eredita il rung più alto <= del suo."
+    },
+
+    "byLevelDie": {
+      "type": "object",
+      "patternProperties": {
+        "^([1-9]|1[0-9]|20)$": { "$ref": "#/$defs/dieFaces" }
+      },
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Mappa livello->facce dado (4|6|8|10|12)."
+    },
+
+    "byLevelDiceString": {
+      "type": "object",
+      "patternProperties": {
+        "^([1-9]|1[0-9]|20)$": { "type": "string", "pattern": "^\\d+d\\d+$" }
+      },
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Mappa livello->espressione dadi (es. cantrip_damage: {\"1\":\"1d8\",\"5\":\"2d8\",\"11\":\"3d8\",\"17\":\"4d8\"})."
+    },
+
+    "effectCondition": {
+      "type": "string",
+      "enum": ["always", "unarmored", "unarmored_no_shield", "no_heavy_armor", "wearing_armor", "wearing_heavy_armor", "while_active"],
+      "description": "Insieme CHIUSO. Ogni membro deve essere decidibile dall'equipment/stato di gioco. unarmored permette scudo (Barbarian), unarmored_no_shield no (Monk). while_active richiede activeState sul feature."
+    },
+
+    "weaponFilter": {
+      "type": "string",
+      "enum": ["any", "unarmed", "monk_weapon_or_unarmed", "melee", "melee_strength", "finesse_or_ranged", "ranged", "one_handed_melee"],
+      "description": "Insieme CHIUSO. Predicato che weaponMatchesFilter deve saper rispondere su una weapon row."
+    },
+
+    "activeState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "label": { "type": "string", "minLength": 1 }
+      },
+      "description": "Dichiarazione che il feature è toggle on/off. Gli effect while_active applicano solo quando id è in playState.activeStates. Accendere spende il resource_cost; spegnere è gratis."
+    },
+
+    "snakeCaseId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Chiave snake_case stabile (persistita su personaggi: cambiarla orfana i salvati)."
+    },
+
+    "featureEffect": {
+      "oneOf": [
+        { "$ref": "#/$defs/effects/proficiency_grant" },
+        { "$ref": "#/$defs/effects/ac_formula" },
+        { "$ref": "#/$defs/effects/ability_substitution" },
+        { "$ref": "#/$defs/effects/damage_die" },
+        { "$ref": "#/$defs/effects/extra_attack" },
+        { "$ref": "#/$defs/effects/speed_bonus" },
+        { "$ref": "#/$defs/effects/damage_bonus" },
+        { "$ref": "#/$defs/effects/extra_damage_dice" },
+        { "$ref": "#/$defs/effects/spell_attack_bonus" },
+        { "$ref": "#/$defs/effects/spell_save_dc_bonus" },
+        { "$ref": "#/$defs/effects/spell_grant" },
+        { "$ref": "#/$defs/effects/resistance" },
+        { "$ref": "#/$defs/effects/ac_bonus" },
+        { "$ref": "#/$defs/effects/attack_bonus" },
+        { "$ref": "#/$defs/effects/save_bonus" },
+        { "$ref": "#/$defs/effects/ability_score_bonus" },
+        { "$ref": "#/$defs/effects/ability_score_override" },
+        { "$ref": "#/$defs/effects/spell_damage_bonus" },
+        { "$ref": "#/$defs/effects/check_modifier" },
+        { "$ref": "#/$defs/effects/save_evasion" },
+        { "$ref": "#/$defs/effects/cantrip_damage" },
+        { "$ref": "#/$defs/effects/cantrip_beams" },
+        { "$ref": "#/$defs/effects/initiative_bonus" },
+        { "$ref": "#/$defs/effects/hp_bonus_per_level" },
+        { "$ref": "#/$defs/effects/resource_cost" }
+      ],
+      "description": "Tassonomia effect CHIUSA, derivata dal survey dei 582 feature PHB. Aggiungere un kind richiede l'implementazione del consumer (Directive 1: un kind senza consumer è una bugia)."
+    },
+
+    "effects": {
+      "proficiency_grant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "const": "proficiency_grant" },
+          "skills": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "tools": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "savingThrows": { "type": "array", "items": { "$ref": "#/$defs/ability" } },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "ac_formula": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "base", "abilities"],
+        "properties": {
+          "kind": { "const": "ac_formula" },
+          "base": { "type": "integer", "minimum": 0, "maximum": 20 },
+          "abilities": { "type": "array", "items": { "$ref": "#/$defs/ability" }, "maxItems": 3 },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "ability_substitution": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "from", "to", "applies", "weaponFilter"],
+        "properties": {
+          "kind": { "const": "ability_substitution" },
+          "from": { "$ref": "#/$defs/ability" },
+          "to": { "$ref": "#/$defs/ability" },
+          "applies": { "type": "array", "items": { "enum": ["attack", "damage"] }, "minItems": 1 },
+          "weaponFilter": { "$ref": "#/$defs/weaponFilter" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "damage_die": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "byLevel", "weaponFilter"],
+        "properties": {
+          "kind": { "const": "damage_die" },
+          "byLevel": { "$ref": "#/$defs/byLevelDie" },
+          "weaponFilter": { "$ref": "#/$defs/weaponFilter" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "extra_attack": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "byLevel"],
+        "properties": {
+          "kind": { "const": "extra_attack" },
+          "byLevel": { "$ref": "#/$defs/byLevelNumber" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "speed_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "const": "speed_bonus" },
+          "amount": { "type": "integer" },
+          "byLevel": { "$ref": "#/$defs/byLevelNumber" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        },
+        "description": "Esattamente uno tra amount e byLevel (enforced dal loader, non da refine qui)."
+      },
+      "damage_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "weaponFilter"],
+        "properties": {
+          "kind": { "const": "damage_bonus" },
+          "amount": { "type": "integer" },
+          "byLevel": { "$ref": "#/$defs/byLevelNumber" },
+          "weaponFilter": { "$ref": "#/$defs/weaponFilter" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "extra_damage_dice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "weaponFilter"],
+        "properties": {
+          "kind": { "const": "extra_damage_dice" },
+          "dice": { "type": "string", "pattern": "^\\d+d\\d+$" },
+          "damageType": { "type": "string", "minLength": 1 },
+          "byLevel": { "$ref": "#/$defs/byLevelDiceString" },
+          "weaponFilter": { "$ref": "#/$defs/weaponFilter" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "spell_attack_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "amount"],
+        "properties": {
+          "kind": { "const": "spell_attack_bonus" },
+          "amount": { "type": "integer" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "spell_save_dc_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "amount"],
+        "properties": {
+          "kind": { "const": "spell_save_dc_bonus" },
+          "amount": { "type": "integer" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "spell_grant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "spellId"],
+        "properties": {
+          "kind": { "const": "spell_grant" },
+          "spellId": { "type": "string", "minLength": 1 },
+          "spellName": { "type": "string" },
+          "useSpellSlot": { "type": "boolean", "default": false },
+          "charges": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["usesFormula", "resetOn"],
+            "properties": {
+              "usesFormula": { "type": "string", "minLength": 1 },
+              "resetOn": { "enum": ["short", "long"] }
+            }
+          },
+          "dcFormula": { "type": "string", "minLength": 1 },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "resistance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "damageTypes"],
+        "properties": {
+          "kind": { "const": "resistance" },
+          "damageTypes": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "ac_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "const": "ac_bonus" },
+          "amount": { "type": "integer" },
+          "fromAbilityModifier": { "$ref": "#/$defs/ability" },
+          "minimum": { "type": "integer" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        },
+        "description": "Esattamente uno tra amount e fromAbilityModifier (loader-enforced)."
+      },
+      "attack_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "weaponFilter"],
+        "properties": {
+          "kind": { "const": "attack_bonus" },
+          "amount": { "type": "integer" },
+          "byLevel": { "$ref": "#/$defs/byLevelNumber" },
+          "weaponFilter": { "$ref": "#/$defs/weaponFilter" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        },
+        "description": "Esattamente uno tra amount e byLevel (loader-enforced)."
+      },
+      "save_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "const": "save_bonus" },
+          "amount": { "type": "integer" },
+          "fromAbilityModifier": { "$ref": "#/$defs/ability" },
+          "minimum": { "type": "integer" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        },
+        "description": "Esattamente uno tra amount e fromAbilityModifier (loader-enforced)."
+      },
+      "ability_score_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "abilities", "amount"],
+        "properties": {
+          "kind": { "const": "ability_score_bonus" },
+          "abilities": { "type": "array", "items": { "$ref": "#/$defs/ability" }, "minItems": 1 },
+          "amount": { "type": "integer" },
+          "maximum": { "type": "integer", "minimum": 1, "maximum": 30 },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "ability_score_override": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "ability", "value"],
+        "properties": {
+          "kind": { "const": "ability_score_override" },
+          "ability": { "$ref": "#/$defs/ability" },
+          "value": { "type": "integer", "minimum": 1, "maximum": 30 },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "spell_damage_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "fromAbilityModifier", "appliesTo"],
+        "properties": {
+          "kind": { "const": "spell_damage_bonus" },
+          "fromAbilityModifier": { "$ref": "#/$defs/ability" },
+          "appliesTo": { "enum": ["cantrips", "named_spell", "damage_type"] },
+          "spellName": { "type": "string", "minLength": 1 },
+          "damageType": { "type": "string", "minLength": 1 },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "check_modifier": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "appliesTo"],
+        "properties": {
+          "kind": { "const": "check_modifier" },
+          "amount": { "type": "integer" },
+          "halfProficiency": { "type": "boolean", "default": false },
+          "floor": { "type": "integer", "minimum": 1, "maximum": 20 },
+          "appliesTo": { "enum": ["non_proficient", "proficient", "all"] },
+          "abilities": { "type": "array", "items": { "$ref": "#/$defs/ability" } },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "save_evasion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "ability"],
+        "properties": {
+          "kind": { "const": "save_evasion" },
+          "ability": { "$ref": "#/$defs/ability" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        },
+        "description": "Solo annotazione: niente sul sheet applica danno in entrata, quindi non computa."
+      },
+      "cantrip_damage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "byLevel"],
+        "properties": {
+          "kind": { "const": "cantrip_damage" },
+          "byLevel": { "$ref": "#/$defs/byLevelDiceString" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        },
+        "description": "Ladder danno cantrip keyed by CHARACTER level (rungs 1/5/11/17). Solo quando la ladder parsata è sbagliata."
+      },
+      "cantrip_beams": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "byLevel"],
+        "properties": {
+          "kind": { "const": "cantrip_beams" },
+          "byLevel": { "$ref": "#/$defs/byLevelNumber" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        },
+        "description": "Eldritch Blast: scala in beam (1, 2 a 5°, 3 a 11°, 4 a 17°), non in dadi."
+      },
+      "initiative_bonus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "amount"],
+        "properties": {
+          "kind": { "const": "initiative_bonus" },
+          "amount": { "type": "integer" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "hp_bonus_per_level": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "amount"],
+        "properties": {
+          "kind": { "const": "hp_bonus_per_level" },
+          "amount": { "type": "integer" },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        }
+      },
+      "resource_cost": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "resourceId"],
+        "properties": {
+          "kind": { "const": "resource_cost" },
+          "resourceId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "amount": { "type": "integer", "minimum": 1 },
+          "variableAmount": { "type": "string", "minLength": 1 },
+          "condition": { "$ref": "#/$defs/effectCondition", "default": "always" }
+        },
+        "description": "Esattamente uno tra amount (costo fisso, drive deduzione) e variableAmount (prose display-only, es. 'equal to the spell's level'). Loader-enforced."
+      }
+    },
+
+    "featureDefinitionBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sources", "featureName", "grantedAtLevel", "effects"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeCaseId" },
+        "sources": { "$ref": "#/$defs/sourceCodes" },
+        "featureName": { "type": "string", "minLength": 1 },
+        "grantedAtLevel": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "effects": { "type": "array", "items": { "$ref": "#/$defs/featureEffect" }, "minItems": 1 },
+        "activeState": { "$ref": "#/$defs/activeState" },
+        "generated": { "type": "boolean", "default": false },
+        "fromClassTable": { "type": "boolean", "default": false },
+        "notes": { "type": "string" }
+      },
+      "description": "Campi condivisi da tutti i 4 file effect + item/background. L'owner (className/raceName/featName/spellName/itemName/backgroundName) è aggiunto dal file-specifico."
+    },
+
+    "classFeatureDefinition": {
+      "allOf": [
+        { "$ref": "#/$defs/featureDefinitionBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "className": { "type": "string", "minLength": 1 },
+            "subclassName": { "type": "string", "minLength": 1 }
+          },
+          "required": ["className"]
+        }
+      ],
+      "description": "classFeatures.json. className può essere '*' per opzioni condivise (fighting styles)."
+    },
+    "raceTraitDefinition": {
+      "allOf": [
+        { "$ref": "#/$defs/featureDefinitionBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "raceName": { "type": "string", "minLength": 1 },
+            "subraceName": { "type": "string", "minLength": 1 }
+          },
+          "required": ["raceName"]
+        }
+      ]
+    },
+    "featEffectDefinition": {
+      "allOf": [
+        { "$ref": "#/$defs/featureDefinitionBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "featName": { "type": "string", "minLength": 1 } },
+          "required": ["featName"]
+        }
+      ],
+      "description": "featEffects.json. grantedAtLevel resta 1: un feat applica perché il personaggio lo ha preso, non a un livello."
+    },
+    "spellEffectDefinition": {
+      "allOf": [
+        { "$ref": "#/$defs/featureDefinitionBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "spellName": { "type": "string", "minLength": 1 } },
+          "required": ["spellName"]
+        }
+      ],
+      "description": "spellEffects.json: cosa lo spell cambia sul personaggio mentre è attivo (Mage Armor AC) + ladder cantrip parsate male. NON i dadi dello spell (quelli sono spells.json)."
+    },
+    "itemFeatureDefinition": {
+      "allOf": [
+        { "$ref": "#/$defs/featureDefinitionBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "itemName": { "type": "string", "minLength": 1 } },
+          "required": ["itemName"]
+        }
+      ]
+    },
+    "backgroundFeatureDefinition": {
+      "allOf": [
+        { "$ref": "#/$defs/featureDefinitionBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "backgroundName": { "type": "string", "minLength": 1 } },
+          "required": ["backgroundName"]
+        }
+      ]
+    },
+
+    "resourceCount": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": { "kind": { "const": "fixed" }, "value": { "type": "integer", "minimum": 0 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "byLevel"],
+          "properties": {
+            "kind": { "const": "table" },
+            "byLevel": {
+              "type": "object",
+              "patternProperties": { "^([1-9]|1[0-9]|20)$": { "type": "integer", "minimum": 0 } },
+              "additionalProperties": false,
+              "minProperties": 1
+            },
+            "unlimitedFromLevel": { "type": "integer", "minimum": 1, "maximum": 20 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "expr"],
+          "properties": { "kind": { "const": "formula" }, "expr": { "type": "string", "minLength": 1 } },
+          "description": "Espressione valida per formulaEvaluator (es. max(1, cha_mod), proficiency). Validata a runtime."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "unlimited" } }
+        }
+      ]
+    },
+    "resourceDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "sources", "className", "grantedAtLevel", "featureName", "count", "resetOn"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeCaseId" },
+        "label": { "type": "string", "minLength": 1 },
+        "aliases": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+        "sources": { "$ref": "#/$defs/sourceCodes" },
+        "className": { "type": "string", "minLength": 1 },
+        "subclassName": { "type": "string", "minLength": 1 },
+        "grantedAtLevel": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "featureName": { "type": "string", "minLength": 1 },
+        "spentBy": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+        "count": { "$ref": "#/$defs/resourceCount" },
+        "dieByLevel": {
+          "type": "object",
+          "patternProperties": { "^([1-9]|1[0-9]|20)$": { "$ref": "#/$defs/dieFacesWith20" } },
+          "additionalProperties": false
+        },
+        "resetOn": { "enum": ["short", "long", "dawn"] },
+        "requiresOptIn": { "type": "boolean", "default": false },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "spellDamage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseRoll"],
+      "properties": {
+        "baseRoll": { "$ref": "#/$defs/diceExpression" },
+        "type": { "type": "string", "minLength": 1 },
+        "attributeMod": { "type": "boolean", "default": false }
+      }
+    },
+    "spellHealing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseRoll"],
+      "properties": {
+        "baseRoll": { "$ref": "#/$defs/diceExpression" },
+        "attributeMod": { "type": "boolean", "default": false }
+      }
+    },
+    "spellUpcast": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "rolls"],
+          "properties": {
+            "kind": { "const": "rolls" },
+            "rolls": { "type": "array", "items": { "$ref": "#/$defs/diceExpression" }, "minItems": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "dice"],
+          "properties": {
+            "kind": { "const": "increment" },
+            "dice": { "$ref": "#/$defs/diceExpression" },
+            "perLevels": { "type": "integer", "minimum": 1, "default": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "none" } }
+        }
+      ]
+    },
+    "spellDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "level", "sources"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "level": { "type": "integer", "minimum": 0, "maximum": 9 },
+        "sources": { "$ref": "#/$defs/sourceCodes" },
+        "damage": { "$ref": "#/$defs/spellDamage" },
+        "healing": { "$ref": "#/$defs/spellHealing" },
+        "upcast": { "$ref": "#/$defs/spellUpcast" },
+        "generated": { "type": "boolean", "default": false },
+        "notes": { "type": "string" }
+      },
+      "description": "spells.json: dadi OWN dello spell e ladder upcast, indipendenti da chi lancia."
+    },
+
+    "featureActionDamage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseRoll"],
+      "properties": {
+        "baseRoll": { "$ref": "#/$defs/damageAmount" },
+        "type": { "type": "string", "minLength": 1 },
+        "attributeMod": { "type": "boolean", "default": false },
+        "byLevel": {
+          "type": "object",
+          "patternProperties": { "^\\d{1,2}$": { "$ref": "#/$defs/damageAmount" } },
+          "additionalProperties": false
+        }
+      }
+    },
+    "featureActionHealing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseRoll"],
+      "properties": {
+        "baseRoll": { "$ref": "#/$defs/diceExpression" },
+        "attributeMod": { "type": "boolean", "default": false },
+        "byLevel": {
+          "type": "object",
+          "patternProperties": { "^\\d{1,2}$": { "$ref": "#/$defs/diceExpression" } },
+          "additionalProperties": false
+        }
+      }
+    },
+    "featureActionTempHp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseRoll"],
+      "properties": {
+        "baseRoll": { "$ref": "#/$defs/damageAmount" },
+        "attributeMod": { "type": "boolean", "default": false },
+        "byLevel": {
+          "type": "object",
+          "patternProperties": { "^\\d{1,2}$": { "$ref": "#/$defs/damageAmount" } },
+          "additionalProperties": false
+        }
+      }
+    },
+    "featureActionSave": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ability"],
+      "properties": {
+        "ability": { "$ref": "#/$defs/ability" },
+        "onSuccess": { "enum": ["none", "half"], "default": "none" }
+      },
+      "description": "ability è ciò che il TARGET tira, NON l'ability del caster che setta la DC."
+    },
+    "featureActionCharges": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usesFormula", "resetOn"],
+      "properties": {
+        "usesFormula": { "type": "string", "minLength": 1 },
+        "byLevel": {
+          "type": "object",
+          "patternProperties": { "^\\d{1,2}$": { "type": "integer", "minimum": 0 } },
+          "additionalProperties": false
+        },
+        "resetOn": { "enum": ["short", "long"] }
+      }
+    },
+    "featureActionSpendCap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceId", "byLevel"],
+      "properties": {
+        "resourceId": { "type": "string", "minLength": 1 },
+        "byLevel": {
+          "type": "object",
+          "patternProperties": { "^\\d{1,2}$": { "type": "integer", "minimum": 1 } },
+          "additionalProperties": false
+        },
+        "per": { "type": "string", "minLength": 1 }
+      },
+      "description": "Massimo che UN uso può pescare dal pool, NON la dimensione del pool (Way of the Four Elements: 3 ki -> 6 a 17° per spell, ma il monk ha 17 ki)."
+    },
+    "featureActionDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sources", "activation"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "className": { "type": "string", "minLength": 1, "default": "*" },
+        "itemName": { "type": "string" },
+        "description": { "type": "string", "minLength": 1 },
+        "sources": { "$ref": "#/$defs/sourceCodes" },
+        "activation": { "enum": ["action", "bonus_action", "reaction", "free", "special"] },
+        "damage": { "$ref": "#/$defs/featureActionDamage" },
+        "healing": { "$ref": "#/$defs/featureActionHealing" },
+        "temporaryHitPoints": { "$ref": "#/$defs/featureActionTempHp" },
+        "savingThrow": { "$ref": "#/$defs/featureActionSave" },
+        "dcFormula": { "type": "string", "minLength": 1 },
+        "charges": { "$ref": "#/$defs/featureActionCharges" },
+        "spendCap": { "$ref": "#/$defs/featureActionSpendCap" },
+        "resourceId": { "type": "string", "minLength": 1 },
+        "generated": { "type": "boolean", "default": false },
+        "notes": { "type": "string" }
+      },
+      "description": "featureActions.json: come un feature si ATTIVA, cosa rolla, cosa costa, contro cosa si salva."
+    },
+
+    "featPrerequisite": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "level"],
+          "properties": { "kind": { "const": "character_level" }, "level": { "type": "integer", "minimum": 1, "maximum": 20 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "className", "level"],
+          "properties": { "kind": { "const": "class_level" }, "className": { "type": "string", "minLength": 1 }, "level": { "type": "integer", "minimum": 1, "maximum": 20 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "className"],
+          "properties": { "kind": { "const": "class" }, "className": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "className", "subclassName"],
+          "properties": { "kind": { "const": "subclass" }, "className": { "type": "string", "minLength": 1 }, "subclassName": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "ability", "minimum"],
+          "properties": { "kind": { "const": "ability" }, "ability": { "$ref": "#/$defs/ability" }, "minimum": { "type": "integer", "minimum": 1, "maximum": 30 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "raceName"],
+          "properties": { "kind": { "const": "race" }, "raceName": { "type": "string", "minLength": 1 }, "subraceName": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "size"],
+          "properties": { "kind": { "const": "size" }, "size": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "spellcasting" } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "featureName"],
+          "properties": { "kind": { "const": "feature" }, "featureName": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "featName"],
+          "properties": { "kind": { "const": "feat" }, "featName": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "proficiency"],
+          "properties": { "kind": { "const": "proficiency" }, "proficiency": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "text"],
+          "properties": { "kind": { "const": "other" }, "text": { "type": "string", "minLength": 1 } }
+        }
+      ],
+      "description": "Insieme CHIUSO. 'other' è display-only, mai enforced."
+    },
+    "featPrerequisiteGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anyOf"],
+      "properties": {
+        "anyOf": { "type": "array", "items": { "$ref": "#/$defs/featPrerequisite" }, "minItems": 1 }
+      },
+      "description": "Condizioni dentro un gruppo sono OR-ed; i gruppi sono AND-ed."
+    },
+    "featPoolOwner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["className", "featureName"],
+      "properties": {
+        "className": { "type": "string", "minLength": 1 },
+        "subclassName": { "type": "string", "minLength": 1 },
+        "featureName": { "type": "string", "minLength": 1 },
+        "grantedByFeats": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] }
+      }
+    },
+    "featGrant": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "poolPrefix", "picks"],
+          "properties": {
+            "kind": { "const": "feat_pool" },
+            "poolPrefix": { "type": "string", "minLength": 1 },
+            "picks": { "type": "integer", "minimum": 1, "maximum": 10 },
+            "onlyWithoutPrerequisite": { "type": "boolean", "default": false },
+            "label": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "className", "featureName", "picks"],
+          "properties": {
+            "kind": { "const": "class_feature_options" },
+            "className": { "type": "string", "minLength": 1 },
+            "featureName": { "type": "string", "minLength": 1 },
+            "picks": { "type": "integer", "minimum": 1, "maximum": 10 },
+            "mustDifferFromKnown": { "type": "boolean", "default": false },
+            "label": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "featPrerequisiteDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sources", "category"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "sources": { "$ref": "#/$defs/sourceCodes" },
+        "category": { "enum": ["feat", "class_option"] },
+        "poolOwner": { "$ref": "#/$defs/featPoolOwner" },
+        "prerequisites": { "type": "array", "items": { "$ref": "#/$defs/featPrerequisiteGroup" }, "default": [] },
+        "grants": { "type": "array", "items": { "$ref": "#/$defs/featGrant" }, "default": [] },
+        "rawPrerequisite": { "type": "string" },
+        "generated": { "type": "boolean", "default": false },
+        "notes": { "type": "string" }
+      },
+      "description": "featPrerequisites.json. 356/519 voci <feat> sono class_option (manovre, invocazioni), non feat: category le tiene fuori dal catalogo ASI."
+    },
+
+    "damageTypeClosed": {
+      "type": "string",
+      "enum": ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"],
+      "description": "Insieme chiuso dei 13 damage type 5e. Una word scrapata non è un damage type (il parser emetteva 'the' come damage type)."
+    },
+    "raceOptionGrant": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "damageType"],
+          "properties": {
+            "kind": { "const": "resistance" },
+            "damageType": { "$ref": "#/$defs/damageTypeClosed" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "featureName", "damageType"],
+          "properties": {
+            "kind": { "const": "action_damage_type" },
+            "featureName": { "type": "string", "minLength": 1 },
+            "damageType": { "$ref": "#/$defs/damageTypeClosed" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "featureName", "ability"],
+          "properties": {
+            "kind": { "const": "action_saving_throw" },
+            "featureName": { "type": "string", "minLength": 1 },
+            "ability": { "$ref": "#/$defs/ability" },
+            "onSuccess": { "enum": ["none", "half"], "default": "none" }
+          }
+        }
+      ]
+    },
+    "raceOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "grants"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeCaseId" },
+        "label": { "type": "string", "minLength": 1 },
+        "hint": { "type": "string", "minLength": 1 },
+        "grants": { "type": "array", "items": { "$ref": "#/$defs/raceOptionGrant" }, "minItems": 1 }
+      }
+    },
+    "raceOptionGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["choiceId", "raceName", "traitName", "label", "sources", "options"],
+      "properties": {
+        "choiceId": { "$ref": "#/$defs/snakeCaseId" },
+        "raceName": { "type": "string", "minLength": 1 },
+        "subraceName": { "type": "string", "minLength": 1 },
+        "traitName": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "sources": { "$ref": "#/$defs/sourceCodes" },
+        "options": { "type": "array", "items": { "$ref": "#/$defs/raceOption" }, "minItems": 2 },
+        "notes": { "type": "string" }
+      },
+      "description": "raceOptions.json. Scelte che un race trait offre (Draconic Ancestry: 10 draghi, ognuno setta damage type + save)."
+    },
+
+    "classSaveDc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["className", "label", "abilities", "sources"],
+      "properties": {
+        "className": { "type": "string", "minLength": 1 },
+        "subclassName": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "abilities": { "type": "array", "items": { "$ref": "#/$defs/ability" }, "minItems": 1, "maxItems": 3 },
+        "sources": { "$ref": "#/$defs/sourceCodes" },
+        "fromClassTable": { "type": "boolean", "default": false },
+        "notes": { "type": "string" }
+      },
+      "description": "classSaveDc.json. abilities è l'ability del CASTER che setta la DC, NON ciò che il target tira. Lista perché a volte c'è scelta (Battle Master: str o dex, si usa il migliore)."
+    },
+
+    "foldedFeatureDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["className", "parentFeatureName", "grantedAtLevel", "children", "sources"],
+      "properties": {
+        "className": { "type": "string", "minLength": 1 },
+        "parentFeatureName": { "type": "string", "minLength": 1 },
+        "grantedAtLevel": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "children": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+        "sources": { "$ref": "#/$defs/sourceCodes" },
+        "notes": { "type": "string" }
+      },
+      "description": "foldedFeatures.json. Heading dentro il prose del parent che sono feature reali (Monk Ki: Flurry of Blows, Patient Defense, Step of the Wind). Curato perché 20 feature hanno heading bare e solo 1 ha feature reali."
+    },
+
+    "raceAsiFixedBonus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ability", "bonus"],
+      "properties": {
+        "ability": { "$ref": "#/$defs/ability" },
+        "bonus": { "type": "integer", "description": "Può essere negativo (alcune race hanno penalty)." }
+      }
+    },
+    "raceAsiFlexibleChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "count", "bonus", "options"],
+      "properties": {
+        "type": { "const": "flexible" },
+        "count": { "type": "integer", "minimum": 1, "maximum": 6 },
+        "bonus": { "type": "integer", "minimum": 1 },
+        "options": { "type": "array", "items": { "$ref": "#/$defs/ability" }, "minItems": 1 }
+      }
+    },
+    "raceAsiDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raceName", "sources", "notes"],
+      "properties": {
+        "raceName": { "type": "string", "minLength": 1 },
+        "sources": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+        "asi": { "type": "array", "items": { "$ref": "#/$defs/raceAsiFixedBonus" }, "default": [] },
+        "asiChoices": { "type": "array", "items": { "$ref": "#/$defs/raceAsiFlexibleChoice" }, "default": [] },
+        "replace": { "type": "boolean", "default": false },
+        "notes": { "type": "string", "minLength": 1 }
+      },
+      "description": "raceAsi.json. ASI che il compendium non porta (Human Variant: ability='' e nessun trait ASI). notes è OBBLIGATORIO: un override curato senza motivazione è incontrollabile."
+    },
+
+    "wildShapeRung": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxCr"],
+      "properties": {
+        "maxCr": { "type": "string", "pattern": "^(0|1/8|1/4|1/2|\\d{1,2})$" },
+        "noFlyingSpeed": { "type": "boolean", "default": false },
+        "noSwimmingSpeed": { "type": "boolean", "default": false }
+      }
+    },
+    "wildShapeDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "className", "featureName", "grantedAtLevel", "sources", "byLevel"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "className": { "type": "string", "minLength": 1 },
+        "subclassName": { "type": "string", "minLength": 1 },
+        "featureName": { "type": "string", "minLength": 1 },
+        "grantedAtLevel": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "sources": { "$ref": "#/$defs/sourceCodes" },
+        "byLevel": {
+          "type": "object",
+          "patternProperties": { "^\\d{1,2}$": { "$ref": "#/$defs/wildShapeRung" } },
+          "additionalProperties": false
+        },
+        "fromClassTable": { "type": "boolean", "default": false },
+        "generated": { "type": "boolean", "default": false },
+        "notes": { "type": "string" }
+      },
+      "description": "wildShape.json. Tabelle Beast Shapes (PHB p.66) e Circle of the Moon (p.69) che il compendium shippa come prose in <text>."
+    },
+
+    "sourceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "code", "isCore", "order", "folder"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "code": { "$ref": "#/$defs/sourceCode" },
+        "isCore": { "type": "boolean" },
+        "order": { "type": "integer" },
+        "folder": { "type": "string", "minLength": 1 }
+      },
+      "description": "Voce sources.json. GENERATO da npm run sources:emit, non hand-edit."
+    }
+  },
+
+  "oneOf": [
+    {
+      "title": "classFeatures.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/classFeatureDefinition" } }
+      }
+    },
+    {
+      "title": "raceTraits.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/raceTraitDefinition" } }
+      }
+    },
+    {
+      "title": "featEffects.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/featEffectDefinition" } }
+      }
+    },
+    {
+      "title": "spellEffects.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/spellEffectDefinition" } }
+      }
+    },
+    {
+      "title": "itemFeatures.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/itemFeatureDefinition" } }
+      }
+    },
+    {
+      "title": "backgroundFeatures.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/backgroundFeatureDefinition" } }
+      }
+    },
+    {
+      "title": "resources.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/resourceDefinition" } }
+      }
+    },
+    {
+      "title": "spells.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/spellDefinition" } }
+      }
+    },
+    {
+      "title": "featureActions.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/featureActionDefinition" } }
+      }
+    },
+    {
+      "title": "featPrerequisites.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/featPrerequisiteDefinition" } }
+      }
+    },
+    {
+      "title": "foldedFeatures.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/foldedFeatureDefinition" } }
+      }
+    },
+    {
+      "title": "raceOptions.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/raceOptionGroup" } }
+      }
+    },
+    {
+      "title": "classSaveDc.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/classSaveDc" } }
+      }
+    },
+    {
+      "title": "raceAsi.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "version": { "type": "integer" },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/raceAsiDefinition" } }
+      },
+      "description": "Nota: raceAsi è l'unico envelope con version come integer opzionale (non const 1) — legacy."
+    },
+    {
+      "title": "wildShape.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "definitions"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "definitions": { "type": "array", "items": { "$ref": "#/$defs/wildShapeDefinition" } }
+      }
+    },
+    {
+      "title": "sources.json",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sources"],
+      "properties": {
+        "$comment": { "type": "string" },
+        "version": { "const": 1 },
+        "sources": { "type": "array", "items": { "$ref": "#/$defs/sourceEntry" } }
+      }
+    }
+  ]
+}

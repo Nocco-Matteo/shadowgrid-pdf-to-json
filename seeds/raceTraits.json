@@ -1,0 +1,680 @@
+{
+  "$comment": "What a RACE or SUBRACE trait changes about a derived number. One of the four owner-split effect files; see data/README.md.",
+  "version": 1,
+  "definitions": [
+    {
+      "id": "race_aasimar_celestial_resistance",
+      "raceName": "Aasimar",
+      "featureName": "Celestial Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "dungeon_masters_guide",
+        "volos_guide_to_monsters"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "necrotic",
+            "radiant"
+          ]
+        }
+      ],
+      "notes": "Covers every Aasimar variant — Protector, Fallen, Scourge and the DMG printing all carry the same trait."
+    },
+    {
+      "id": "race_aetherborn_born_of_aether",
+      "raceName": "Aetherborn",
+      "featureName": "Born of Aether",
+      "grantedAtLevel": 1,
+      "sources": [
+        "plane_shift"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "necrotic"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dwarf_dwarven_resilience",
+      "raceName": "Dwarf",
+      "featureName": "Dwarven Resilience",
+      "grantedAtLevel": 1,
+      "sources": [
+        "plane_shift",
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "poison"
+          ]
+        }
+      ],
+      "notes": "'You have advantage on saving throws against poison, and you have resistance against poison damage.' Only the resistance is a number; the save advantage carries none."
+    },
+    {
+      "id": "race_genasi_fire_resistance",
+      "raceName": "Genasi (Fire)",
+      "featureName": "Fire Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "princes_of_the_apocalypse"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "fire"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_genasi_water_acid_resistance",
+      "raceName": "Genasi (Water)",
+      "featureName": "Acid Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "princes_of_the_apocalypse"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "acid"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_goliath_mountain_born",
+      "raceName": "Goliath",
+      "featureName": "Mountain Born",
+      "grantedAtLevel": 1,
+      "sources": [
+        "volos_guide_to_monsters"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "cold"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_kalashtar_mental_discipline",
+      "raceName": "Kalashtar",
+      "featureName": "Mental Discipline",
+      "grantedAtLevel": 1,
+      "sources": [
+        "eberron_rising_from_the_last_war"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "psychic"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_lizardfolk_natural_armor",
+      "raceName": "Lizardfolk (DMG)",
+      "featureName": "Natural Armor",
+      "grantedAtLevel": 1,
+      "sources": [
+        "dungeon_masters_guide"
+      ],
+      "effects": [
+        {
+          "kind": "ac_bonus",
+          "amount": 3,
+          "condition": "unarmored"
+        }
+      ],
+      "notes": "The DMG printing, named as the compendium spells it so it does not collide with Volo's Lizardfolk, which grants 13 + DEX instead. This one states only '+3 bonus to Armor Class' and no armour condition; curated as unarmored because natural armour never stacks with worn armour in 5e."
+    },
+    {
+      "id": "race_lizardfolk_volo_natural_armor",
+      "raceName": "Lizardfolk",
+      "featureName": "Natural Armor",
+      "grantedAtLevel": 1,
+      "sources": [
+        "volos_guide_to_monsters"
+      ],
+      "effects": [
+        {
+          "kind": "ac_formula",
+          "base": 13,
+          "abilities": [
+            "dex"
+          ],
+          "condition": "unarmored"
+        }
+      ],
+      "notes": "Volo's printing: 'your AC is 13 + your Dexterity modifier'. The DMG's Lizardfolk instead gives a flat +3, which is why race matching prefers an exact name over a prefix."
+    },
+    {
+      "id": "race_locathah_natural_armor",
+      "raceName": "Locathah",
+      "featureName": "Natural Armor",
+      "grantedAtLevel": 1,
+      "sources": [
+        "locathah_rising"
+      ],
+      "effects": [
+        {
+          "kind": "ac_formula",
+          "base": 12,
+          "abilities": [
+            "dex"
+          ],
+          "condition": "unarmored"
+        }
+      ]
+    },
+    {
+      "id": "race_loxodon_natural_armor",
+      "raceName": "Loxodon",
+      "featureName": "Natural Armor",
+      "grantedAtLevel": 1,
+      "sources": [
+        "guildmasters_guide_to_ravnica"
+      ],
+      "effects": [
+        {
+          "kind": "ac_formula",
+          "base": 12,
+          "abilities": [
+            "con"
+          ],
+          "condition": "unarmored"
+        }
+      ],
+      "notes": "'When you aren't wearing armor, your AC is 12 + your Constitution modifier.'"
+    },
+    {
+      "id": "race_shifter_beasthide_shifting",
+      "raceName": "Shifter",
+      "subraceName": "Beasthide",
+      "featureName": "Shifting Feature",
+      "grantedAtLevel": 1,
+      "sources": [
+        "eberron_rising_from_the_last_war",
+        "unearthed_arcana"
+      ],
+      "effects": [
+        {
+          "kind": "ac_bonus",
+          "amount": 1,
+          "condition": "while_active"
+        }
+      ],
+      "activeState": {
+        "id": "shifted",
+        "label": "Mutaforma"
+      },
+      "notes": "Beasthide only. The +1 AC lasts while shifted, so it rides the same switchable state features use."
+    },
+    {
+      "id": "race_tiefling_hellish_resistance",
+      "raceName": "Tiefling",
+      "featureName": "Hellish Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "fire"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_tortle_natural_armor",
+      "raceName": "Tortle",
+      "featureName": "Natural Armor",
+      "grantedAtLevel": 1,
+      "sources": [
+        "the_tortle_package"
+      ],
+      "effects": [
+        {
+          "kind": "ac_formula",
+          "base": 17,
+          "abilities": [],
+          "condition": "unarmored"
+        }
+      ],
+      "notes": "'a base AC of 17 (your Dexterity modifier doesn't affect this number)' — hence an empty ability list rather than the usual +DEX."
+    },
+    {
+      "id": "race_triton_guardians_of_the_depths",
+      "raceName": "Triton",
+      "featureName": "Guardians of the Depths",
+      "grantedAtLevel": 1,
+      "sources": [
+        "volos_guide_to_monsters"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "cold"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_troglodyte_natural_armor",
+      "raceName": "Troglodyte (DMG)",
+      "featureName": "Natural Armor",
+      "grantedAtLevel": 1,
+      "sources": [
+        "dungeon_masters_guide"
+      ],
+      "effects": [
+        {
+          "kind": "ac_bonus",
+          "amount": 1,
+          "condition": "unarmored"
+        }
+      ],
+      "notes": "Text states no armour condition; curated as unarmored for the same reason as the DMG Lizardfolk — natural armour never stacks with worn armour."
+    },
+    {
+      "id": "race_vampire_vampiric_resistance",
+      "raceName": "Vampire",
+      "featureName": "Vampiric Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "plane_shift"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "necrotic"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_warforged_constructed_resilience",
+      "raceName": "Warforged",
+      "featureName": "Constructed Resilience",
+      "grantedAtLevel": 1,
+      "sources": [
+        "eberron_rising_from_the_last_war"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "poison"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_warforged_integrated_protection",
+      "raceName": "Warforged",
+      "featureName": "Integrated Protection",
+      "grantedAtLevel": 1,
+      "sources": [
+        "eberron_rising_from_the_last_war"
+      ],
+      "effects": [
+        {
+          "kind": "ac_bonus",
+          "amount": 1
+        }
+      ],
+      "notes": "'Your body has built-in defensive layers, which can be enhanced with armor: +1 bonus to Armor Class.' Explicitly stacks with worn armour, so no condition."
+    },
+    {
+      "id": "race_dwarf_hill_dwarven_toughness",
+      "raceName": "Dwarf",
+      "subraceName": "Hill",
+      "featureName": "Dwarven Toughness",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "hp_bonus_per_level",
+          "amount": 1
+        }
+      ],
+      "notes": "Your hit point maximum increases by 1, and it increases by 1 every time you gain a level."
+    },
+    {
+      "id": "race_halfling_stout_stout_resilience",
+      "raceName": "Halfling",
+      "subraceName": "Stout",
+      "featureName": "Stout Resilience",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "poison"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_elf_wood_fleet_of_foot",
+      "raceName": "Elf",
+      "subraceName": "Wood",
+      "featureName": "Fleet of Foot",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "speed_bonus",
+          "amount": 5,
+          "condition": "always"
+        }
+      ]
+    },
+    {
+      "id": "race_centaur_speed",
+      "raceName": "Centaur",
+      "featureName": "Speed",
+      "grantedAtLevel": 1,
+      "sources": [
+        "guildmasters_guide_to_ravnica",
+        "mythic_odysseys_of_theros"
+      ],
+      "effects": [
+        {
+          "kind": "speed_bonus",
+          "amount": 10,
+          "condition": "always"
+        }
+      ]
+    },
+    {
+      "id": "race_satyr_speed",
+      "raceName": "Satyr",
+      "featureName": "Speed",
+      "grantedAtLevel": 1,
+      "sources": [
+        "mythic_odysseys_of_theros"
+      ],
+      "effects": [
+        {
+          "kind": "speed_bonus",
+          "amount": 5,
+          "condition": "always"
+        }
+      ]
+    },
+    {
+      "id": "race_leonin_speed",
+      "raceName": "Leonin",
+      "featureName": "Speed",
+      "grantedAtLevel": 1,
+      "sources": [
+        "mythic_odysseys_of_theros"
+      ],
+      "effects": [
+        {
+          "kind": "speed_bonus",
+          "amount": 5,
+          "condition": "always"
+        }
+      ]
+    },
+    {
+      "id": "race_grung_poison_immunity",
+      "raceName": "Grung",
+      "featureName": "Poison Immunity",
+      "grantedAtLevel": 1,
+      "sources": [
+        "one_grung_above"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "poison"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_yuanti_pureblood_poison_immunity",
+      "raceName": "Yuan-ti Pureblood",
+      "featureName": "Poison Immunity",
+      "grantedAtLevel": 1,
+      "sources": [
+        "volos_guide_to_monsters"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "poison"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_simic_hybrid_carapace",
+      "raceName": "Simic Hybrid",
+      "featureName": "Animal Enhancement",
+      "grantedAtLevel": 5,
+      "sources": [
+        "guildmasters_guide_to_ravnica"
+      ],
+      "effects": [
+        {
+          "kind": "ac_bonus",
+          "amount": 1,
+          "condition": "no_heavy_armor"
+        }
+      ],
+      "notes": "Carapace: +1 AC while wearing no heavy armor."
+    },
+    {
+      "id": "race_dragonborn_black_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "Black",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "acid"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dragonborn_blue_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "Blue",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "lightning"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dragonborn_brass_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "Brass",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "fire"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dragonborn_bronze_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "Bronze",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "lightning"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dragonborn_copper_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "Copper",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "acid"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dragonborn_gold_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "Gold",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "fire"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dragonborn_green_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "Green",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "poison"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dragonborn_red_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "Red",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "fire"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dragonborn_silver_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "Silver",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "cold"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "race_dragonborn_white_damage_resistance",
+      "raceName": "Dragonborn",
+      "subraceName": "White",
+      "featureName": "Damage Resistance",
+      "grantedAtLevel": 1,
+      "sources": [
+        "players_handbook"
+      ],
+      "effects": [
+        {
+          "kind": "resistance",
+          "damageTypes": [
+            "cold"
+          ]
+        }
+      ]
+    }
+  ]
+}
