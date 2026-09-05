@@ -1,4 +1,4 @@
-# dnd-pdf-to-json
+# shadowgrid-pdf-to-json
 
 Pipeline di estrazione strutturata da scansioni PDF → JSON nidificato con citazione
 verificabile per ogni valore. Implementazione di `pipeline-estrazione-spec.md.pdf`.
