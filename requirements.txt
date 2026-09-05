@@ -1,0 +1,17 @@
+# Pin di riproducibilità per la target machine (RTX 4090).
+# Installa in ambienti separati per evitare conflitti CUDA.
+pydantic>=2.6,<3
+pydantic-settings>=2.2
+rapidfuzz>=3.6
+pymupdf>=1.24
+opencv-python-headless>=4.9
+numpy>=1.26
+pillow>=10.2
+# I pesanti (vllm/paddleocr) vanno installati a parte con CUDA toolkit compatibile.
+# vllm>=0.5
+# paddleocr>=2.7
+# paddlepaddle-gpu>=2.6
+gradio>=4.20
+pytest>=8
+pytest-cov>=5
+ruff>=0.4
