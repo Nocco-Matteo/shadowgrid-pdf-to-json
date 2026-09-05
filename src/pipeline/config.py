@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     extractor_url: str = "http://127.0.0.1:8080/v1"
 
     model_a: str = "PaddlePaddle/PaddleOCR-VL-1.6"
-    model_b: str = "deepseek-ai/deepseek-ocr2"  # o dots.ocr
-    extractor_model: str = "Qwen/Qwen3.8-27B-AWQ"
+    model_b: str = "deepseek-ai/DeepSeek-OCR-2"
+    extractor_model: str = "nicosuter/Qwen3.8-27B-AWQ"
 
     # Rasterizzazione
     dpi: int = 300

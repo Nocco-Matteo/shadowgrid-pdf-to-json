@@ -19,8 +19,15 @@ Target (CUDA): scommenta vllm/paddlepaddle-gpu in `requirements.txt`, poi `pip i
 
 ## Note operative
 
-- VRAM: PaddleOCR-VL ~3GB; Qwen3.8-27B AWQ 4-bit ~18GB + KV. 32GB RAM sistema →
-  niente offload → fasi in serie; vLLM si spegne/riparte tra fasi. Stato su SQLite WAL.
+- VRAM: PaddleOCR-VL-1.6 ~3GB; DeepSeek-OCR-2 ~4GB; Qwen3.8-27B AWQ 4-bit ~18GB + KV.
+  32GB RAM sistema → niente offload → fasi in serie; vLLM si spegne/riparte tra fasi.
+  Stato su SQLite WAL.
+- vLLM richiede Linux o WSL2 con CUDA. Non gira su Windows nativo.
+  Modelli (ID HuggingFace verificati):
+    PaddlePaddle/PaddleOCR-VL-1.6 (OCR primario)
+    deepseek-ai/DeepSeek-OCR-2 (OCR secondario)
+    nicosuter/Qwen3.8-27B-AWQ (estrattore)
+  Pre-scarica con: huggingface-cli download <model_id>
 - Le dipendenze pesanti (vllm, paddleocr, pymupdf, opencv) sono opzionali: i test
   girano con stub quando non installate.
 - Gold set: annotare PRIMA di guardare l'output del modello. Split 15 dev / resto

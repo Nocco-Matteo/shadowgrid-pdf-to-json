@@ -11,3 +11,4 @@ runs/
 *.db-wal
 *.db-shm
 config_entry-*.json
+data/pdfs/
