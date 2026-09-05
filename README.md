@@ -10,8 +10,9 @@ tra fasi); stato su SQLite WAL → kill & resume sicuro.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -e ".[ocr,dev]"          # ambiente leggero (sviluppo/test)
-# sulla target machine con CUDA: pip install -e ".[ocr,vllm,ui,dev]"
+pip install -r requirements.txt      # sviluppo (pesanti CUDA commentati)
+# sulla target machine: scommenta vllm/paddlepaddle-gpu in requirements.txt
+# poi: pip install -r requirements.txt
 
 pytest -q                            # test (con stub per dipendenze pesanti)
 ruff check src tests

@@ -2,8 +2,8 @@
 
 ## Ambiente
 
-Sviluppo (senza GPU): `pip install -e ".[ocr,dev]"`
-Target (CUDA): `pip install -e ".[ocr,vllm,ui,dev]"`
+Sviluppo (senza GPU): `pip install -r requirements.txt`
+Target (CUDA): scommenta vllm/paddlepaddle-gpu in `requirements.txt`, poi `pip install -r requirements.txt`
 
 ## Verifica
 

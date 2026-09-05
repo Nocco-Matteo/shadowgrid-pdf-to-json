@@ -8,32 +8,8 @@ version = "0.1.0"
 description = "Pipeline di estrazione strutturata da scansioni PDF -> JSON nidificato con citazione verificabile"
 requires-python = ">=3.11"
 readme = "README.md"
-dependencies = [
-  "pydantic>=2.6,<3",
-  "pydantic-settings>=2.2",
-  "rapidfuzz>=3.6",
-]
-
-[project.optional-dependencies]
-ocr = [
-  "pymupdf>=1.24",
-  "opencv-python-headless>=4.9",
-  "numpy>=1.26",
-  "pillow>=10.2",
-]
-vllm = [
-  "vllm>=0.5",
-  "paddleocr>=2.7",
-  "paddlepaddle>=2.6",
-]
-ui = [
-  "gradio>=4.20",
-]
-dev = [
-  "pytest>=8",
-  "pytest-cov>=5",
-  "ruff>=0.4",
-]
+# Le dipendenze vivono in requirements.txt (unica sorgente di verità).
+# pyproject.toml contiene solo metadati di build e config degli strumenti.
 
 [project.scripts]
 pipeline = "pipeline.cli:main"
