@@ -6,10 +6,12 @@ Tre cancelli in sequenza. Un campo che ne fallisce uno non entra nell'output.
     score = rapidfuzz.fuzz.partial_ratio(norm(quote), norm(page_full_text))
     assert score >= 90   (sotto soglia -> allucinato, scarta)
 
-6.2 Cancello coerenza value <-> quote:
-    - numeri/date -> estrai token numerici dalla quote, value è una normalizzazione;
+6.2 Cancello coerenza value <-> quote (conservativo):
+    - numeri/date -> token numerici CON SEGNO della quote, value è una normalizzazione;
     - enum -> la quote contiene il termine che mappa a quel valore;
     - stringhe libere -> value è una sottostringa normalizzata della quote.
+    Nessun overlap permissivo: meglio la coda umana dell'errore silenzioso.
+    Assenza dichiarata (value=null E quote=null): validata senza cancelli.
 
 6.3 Cancello schema: SchemaStrict.model_validate().
 
@@ -27,11 +29,13 @@ import logging
 import re
 from typing import Any
 
+from pydantic import BaseModel
 from rapidfuzz.fuzz import partial_ratio
 
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
+from .schema import _is_extracted_model, _list_inner_type, loose
 from .text_norm import normalize
 
 log = logging.getLogger(__name__)
@@ -41,20 +45,70 @@ log = logging.getLogger(__name__)
 # 6.1 Grounding
 # ---------------------------------------------------------------------------
 
+# Varianti Unicode del segno meno (− U+2212, – U+2013, — U+2014): prima di
+# estrarre i numeri vanno ridotte al meno ASCII, altrimenti "42" verrebbe
+# accettato contro "−42".
+_UNI_MINUS = re.compile(r"[\u2212\u2013\u2014]")
+# Numero con segno (anche staccato: "- 42") — il segno fa parte del valore.
+_NUM_RE = re.compile(r"[-+]?\s*\d[\d.,]*")
+# Token contenente cifre (identificativi, date, importi): "44/B", "2024-03-15",
+# "1.234,50", "ABC123". Vanno confrontati ESATTAMENTE, non fuzzy.
+_IDENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.,/\\-]*[A-Za-z0-9]|[A-Za-z0-9]")
+
+
+def _signed_numbers(text: str) -> list[float]:
+    """Token numerici con segno, normalizzati. '−42' e '- 42' -> -42.0."""
+    t = _UNI_MINUS.sub("-", text)
+    out: list[float] = []
+    for tok in _NUM_RE.findall(t):
+        nv = _normalize_number(tok.replace(" ", ""))
+        if nv is not None:
+            out.append(nv)
+    return out
+
+
+def _identifier_tokens(text: str) -> list[str]:
+    """Token con almeno una cifra: numeri, date, identificativi."""
+    t = _UNI_MINUS.sub("-", text)
+    return [tok for tok in _IDENT_RE.findall(t) if any(c.isdigit() for c in tok)]
+
 
 def gate_grounding(quote: str, page_full_text: str, threshold: int = 90) -> bool:
+    """La citazione deve essere (quasi) verbatim nel testo della pagina.
+
+    Tre controlli:
+    1. lunghezza: una quote più lunga dell'intera pagina non può essere
+       verbatim (chiude l'inversione di partial_ratio);
+    2. fuzzy sul contesto (partial_ratio >= threshold): tollera rumore OCR
+       sulle parole;
+    3. corrispondenza ESATTA dei token numerici/identificativi: il fuzzy sul
+       contesto non basta — "CONTRATTO N. 44/B" e "CONTRATTO N. 45/B" hanno
+       score alto. Il segno fa parte del numero: una quote con "-42" non è
+       verificata da una pagina che dice "42" (e viceversa)."""
     if not quote or not page_full_text:
         return False
-    score = partial_ratio(normalize(quote), normalize(page_full_text))
-    return score >= threshold
+    nq = normalize(quote)
+    nft = normalize(page_full_text)
+    if len(nq) > len(nft):
+        return False  # non può essere verbatim se è più lunga della pagina
+    if partial_ratio(nq, nft) < threshold:
+        return False
+    # token con cifre: devono apparire tali e quali nel testo della pagina
+    for ident in _identifier_tokens(quote):
+        if normalize(ident) not in nft:
+            return False
+    # numeri con segno: ogni numero della quote deve esistere nella pagina
+    q_nums = _signed_numbers(quote)
+    if q_nums:
+        p_nums = set(_signed_numbers(page_full_text))
+        if not all(nv in p_nums for nv in q_nums):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
 # 6.2 Coerenza value <-> quote
 # ---------------------------------------------------------------------------
-
-
-_NUM_RE = re.compile(r"\d[\d.,]*\d|\d")
 
 
 def _normalize_number(s: str) -> float | None:
@@ -89,40 +143,33 @@ def _normalize_number(s: str) -> float | None:
 
 
 def gate_value_quote(value: Any, quote: str) -> bool:
-    """Il valore deve essere derivabile dalla citazione."""
+    """Il valore deve essere derivabile dalla citazione. Controlli CONSERVATIVI:
+
+    - numeri: il valore (segno compreso) deve comparire come token numerico
+      della citazione, con le varianti del segno gestite ("−42", "- 42").
+      `42` NON è accettabile se la citazione dice `-42`.
+    - stringhe/enum: il valore normalizzato deve essere contenuto nella
+      citazione normalizzata. Nessun overlap permissivo di token: un valore
+      più lungo della citazione ("Mario Rossi Verdi" vs "Mario Rossi") è
+      un'invenzione, non un'interpretazione.
+
+    Meglio un falso positivo in coda umana che un errore silenzioso."""
     if value is None and quote is None:
         return True
     if value is None or quote is None:
         return False
-    nq = normalize(quote)
     # numeri / date
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:
             v = float(value)
         except (TypeError, ValueError):
             return False
-        for tok in _NUM_RE.findall(quote):
-            nv = _normalize_number(tok)
-            if nv is not None and abs(nv - v) < 1e-6:
-                return True
-        return False
+        return any(abs(nv - v) < 1e-6 for nv in _signed_numbers(quote))
     # enum / stringhe libere
     nv = normalize(str(value))
     if not nv:
         return False
-    # value deve essere sottostringa normalizzata della quote, oppure
-    # la quote contiene il termine che mappa al valore
-    return nv in nq or _token_overlap(nv, nq)
-
-
-def _token_overlap(a: str, b: str) -> bool:
-    ta = set(a.split())
-    tb = set(b.split())
-    if not ta:
-        return False
-    # almeno il 60% dei token di value è presente nella quote
-    overlap = len(ta & tb) / len(ta)
-    return overlap >= 0.6
+    return nv in normalize(quote)
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +210,34 @@ def localize_bbox(quote: str, regions: list[dict]) -> tuple[float, float, float,
 # ---------------------------------------------------------------------------
 
 
+def _schema_leaf_paths(schema: type, db: DB, doc_id: str, prefix: str = "") -> set[str]:
+    """Field path delle foglie Extracted attese per il documento, con le
+    lunghezze delle liste prese dagli inventari di Fase 4."""
+    out: set[str] = set()
+    for name, fi in schema.model_fields.items():
+        ann = fi.annotation
+        inner = _list_inner_type(ann)
+        if inner is not None and isinstance(inner, type) and issubclass(inner, BaseModel):
+            inv = db.latest_extraction(doc_id, f"{prefix}{name}$inventory")
+            n = len(json.loads(inv["value_json"] or "[]")) if inv else 0
+            for i in range(n):
+                out |= _schema_leaf_paths(inner, db, doc_id, f"{prefix}{name}[{i}].")
+        elif _is_extracted_model(ann):
+            out.add(f"{prefix}{name}")
+        elif isinstance(ann, type) and issubclass(ann, BaseModel):
+            out |= _schema_leaf_paths(ann, db, doc_id, f"{prefix}{name}.")
+    return out
+
+
+def _check_coverage(schema_strict: type, db: DB, doc_id: str) -> set[str]:
+    """Campi attesi mai prodotti da nessun tentativo: lavoro incompleto,
+    NON assenza (l'assenza dichiarata è una riga con value=null)."""
+    expected = _schema_leaf_paths(schema_strict, db, doc_id)
+    present = {r["field_path"] for r in db.latest_extractions(doc_id)
+               if "$" not in r["field_path"]}
+    return expected - present
+
+
 def run(
     doc_id: str,
     schema_strict: type,
@@ -172,15 +247,30 @@ def run(
 ) -> None:
     s = settings or get_settings()
     db = db or DB(s)
-    if db.get_status(doc_id) == "validated":
+    st = db.get_status(doc_id)
+    if st in ("validated", "done"):
         log.info("Validazione già fatta: %s", doc_id)
         return
-    if db.get_status(doc_id) != "extracted":
-        raise ValueError(f"Validazione richiede extracted, trovato {db.get_status(doc_id)}")
+    if st == "needs_review":
+        # ripresa: rivalida i pending, poi chiudi con la logica della revisione
+        # (coda vuota + task ok + schema) o resta in needs_review
+        _run_from_needs_review(doc_id, schema_strict, db, s, client)
+        return
+    if st != "extracted":
+        raise ValueError(f"Stato atteso extracted, trovato {st}")
 
     client = client or ExtractorClient(s.extractor_url, s.extractor_model)
 
     extractions = db.get_extractions(doc_id, status="pending")
+    # Guardia: zero estrazioni reali (es. risposta {} dell'estrattore) non è
+    # "documento senza dati", è un'estrazione fallita. I null espliciti
+    # producono righe, quindi qui zero righe = qualcosa si è rotto a monte.
+    real_rows = [r for r in db.get_extractions(doc_id) if "$" not in r["field_path"]]
+    if not real_rows:
+        log.error("Nessuna estrazione per %s: estrazione fallita o risposta vuota",
+                  doc_id)
+        db.set_status(doc_id, "needs_review")
+        return
     # raggruppa per field_path per gestire i retry
     by_field: dict[str, list] = {}
     for e in extractions:
@@ -188,6 +278,8 @@ def run(
 
     needs_review = False
     for field_path, rows in by_field.items():
+        if "$" in field_path:
+            continue  # metadati (es. inventari di Fase 4)
         latest = sorted(rows, key=lambda r: r["attempt"])[-1]
         ok, attempt = _validate_one(doc_id, field_path, latest, schema_strict, db, s, client)
         if not ok:
@@ -195,8 +287,54 @@ def run(
 
     if needs_review:
         db.set_status(doc_id, "needs_review")
-    else:
-        db.transition(doc_id, "extracted", "validated")
+        return
+
+    # Copertura: campi mai prodotti NON diventano assenze via _fill_missing.
+    missing = _check_coverage(schema_strict, db, doc_id)
+    if missing:
+        log.error("Campi mai prodotti per %s (task incompleti?): %s",
+                  doc_id, sorted(missing)[:10])
+        db.set_status(doc_id, "needs_review")
+        return
+
+    # 6.3 sul documento completo: ricostruisci il dict e valida SchemaStrict.
+    # _fill_missing ora non sintetizza nulla di significativo: la copertura
+    # è stata verificata sopra (serve solo a completare la struttura).
+    doc_dict = _build_document(db.get_extractions(doc_id, status="validated"))
+    _fill_missing(schema_strict, doc_dict)
+    schema_ok, err = gate_schema(schema_strict, doc_dict)
+    if not schema_ok:
+        log.error("Schema strict fallito sul documento %s: %s", doc_id, err)
+        db.set_status(doc_id, "needs_review")
+        return
+    db.transition(doc_id, "extracted", "validated")
+
+
+def _run_from_needs_review(
+    doc_id: str,
+    schema_strict: type,
+    db: DB,
+    s: Settings,
+    client: ExtractorClient | None,
+) -> None:
+    """Rivalidazione di un documento in needs_review (es. dopo retry di Fase 5
+    o correzioni umane): processa i pending e chiude il ciclo con gli stessi
+    criteri di completezza della revisione umana."""
+    client = client or ExtractorClient(s.extractor_url, s.extractor_model)
+    extractions = db.get_extractions(doc_id, status="pending")
+    by_field: dict[str, list] = {}
+    for e in extractions:
+        by_field.setdefault(e["field_path"], []).append(e)
+    for field_path, rows in by_field.items():
+        if "$" in field_path:
+            continue
+        latest = sorted(rows, key=lambda r: r["attempt"])[-1]
+        _validate_one(doc_id, field_path, latest, schema_strict, db, s, client)
+
+    from .phase7_review import finalize_review
+
+    if not finalize_review(doc_id, schema_strict, db=db, settings=s):
+        log.info("Documento %s resta in needs_review", doc_id)
 
 
 def _validate_one(
@@ -214,11 +352,17 @@ def _validate_one(
     page_no = row["page_no"]
     value = json.loads(row["value_json"]) if row["value_json"] else None
 
-    # 6.1 grounding
+    # Assenza dichiarata dal modello (value=null E quote=null): verificata,
+    # non fallita. I cancelli non hanno senso senza citazione.
+    if value is None and quote is None:
+        db.upsert_extraction(doc_id, field_path, None, None, page_no,
+                             None, attempt, "validated", row["confidence"])
+        return True, attempt
+
+    # 6.1 grounding (sul testo canonico riconciliato della pagina)
     page_full_text = ""
     if page_no:
-        p = db.get_page(doc_id, page_no)
-        page_full_text = p["full_text"] if p else ""
+        page_full_text = db.get_page_text(doc_id, page_no)
     if not gate_grounding(quote, page_full_text, s.grounding_threshold):
         log.warning("Grounding fallito per %s (attempt %d)", field_path, attempt)
         return _maybe_retry(doc_id, field_path, row, schema_strict, db, s, client,
@@ -233,19 +377,15 @@ def _validate_one(
         db.set_status(doc_id, "needs_review")
         return False, attempt
 
-    # 6.3 schema (validazione cross-field su tutto il documento)
-    # Per validare lo schema ricostruiamo un dict con tutte le estrazioni validated finora.
-    schema_ok, err = _validate_against_schema(doc_id, field_path, schema_strict, db)
-    if not schema_ok:
-        log.warning("Schema fallito per %s: %s", field_path, err)
-        return _maybe_retry(doc_id, field_path, row, schema_strict, db, s, client, err=err)
+    # 6.3 schema: il check cross-field completo si fa a fine fase sul documento
+    # intero (run -> _build_document + gate_schema).
 
-    # 6.5 localizzazione bbox
+    # 6.5 localizzazione bbox (sulle regioni canoniche)
     regions = []
     if page_no:
         regions = [
             {"text": r["text"], "bbox": r["bbox"]}
-            for r in db.get_regions(doc_id, page_no, engine="a")
+            for r in db.get_canonical_regions(doc_id, page_no)
         ]
     bbox = localize_bbox(quote, regions) or _bbox(row)
 
@@ -254,16 +394,141 @@ def _validate_one(
     return True, attempt
 
 
-def _validate_against_schema(
-    doc_id: str, field_path: str, schema_strict: type, db: DB
-) -> tuple[bool, str | None]:
-    """Ricostruisce un dict con tutte le estrazioni validated + quella corrente e
-    valida lo schema strict. Validazione cross-field approssimata per campo."""
-    # Nota: una validazione cross-field completa richiede tutto il documento;
-    # qui facciamo un check per-campo (tipi/vincoli). Il check completo si fa in
-    # phase6 final pass. Implementazione semplice: valida il singolo valore come
-    # Extracted del tipo atteso. Per il MVP accettiamo se value è coerente con quote.
-    return True, None
+_SEG = re.compile(r"([^\.\[\]]+)(?:\[(\d+)\])?")
+
+
+def _set_path(doc: dict, path: str, leaf: dict) -> None:
+    """Scrive `leaf` nel dict annidato seguendo un field_path tipo 'a.b[0].c'."""
+    segs = [(m.group(1), int(m.group(2)) if m.group(2) is not None else None)
+            for m in _SEG.finditer(path)]
+    cur = doc
+    for i, (name, idx) in enumerate(segs):
+        last = i == len(segs) - 1
+        if idx is None:
+            if last:
+                cur[name] = leaf
+            else:
+                cur = cur.setdefault(name, {})
+        else:
+            lst = cur.setdefault(name, [])
+            while len(lst) <= idx:
+                lst.append({})
+            if last:
+                lst[idx] = leaf
+            else:
+                cur = lst[idx]
+
+
+def _build_document(extractions) -> dict:
+    """Ricostruisce il documento (dict di dict stile Extracted) dalle estrazioni."""
+    doc: dict = {}
+    for row in extractions:
+        fp = row["field_path"]
+        if "$" in fp:
+            continue
+        leaf = {
+            "value": json.loads(row["value_json"]) if row["value_json"] else None,
+            "quote": row["quote"],
+            "page": row["page_no"],
+            "bbox": json.loads(row["bbox"]) if row["bbox"] else None,
+            "confidence": row["confidence"] or "high",
+        }
+        _set_path(doc, fp, leaf)
+    return doc
+
+
+def _fill_missing(schema: type, node: dict) -> None:
+    """Campi assenti dalle estrazioni -> Extracted nulli (o None), così
+    SchemaStrict può validare il documento completo."""
+    from pydantic import BaseModel
+
+    for name, fi in schema.model_fields.items():
+        ann = fi.annotation
+        inner = _list_inner_type(ann)
+        if inner is not None and isinstance(inner, type) and issubclass(inner, BaseModel):
+            for item in node.setdefault(name, []):
+                _fill_missing(inner, item)
+        elif _is_extracted_model(ann):
+            node.setdefault(name, {
+                "value": None, "quote": None, "page": None,
+                "bbox": None, "confidence": "low",
+            })
+        elif isinstance(ann, type) and issubclass(ann, BaseModel):
+            _fill_missing(ann, node.setdefault(name, {}))
+        else:
+            node.setdefault(name, None)
+
+
+def _get_path(doc: Any, path: str) -> Any:
+    """Naviga un dict seguendo un field_path tipo 'a.b[0].c'. None se assente."""
+    cur = doc
+    for m in _SEG.finditer(path):
+        name, idx = m.group(1), m.group(2)
+        if not isinstance(cur, dict) or name not in cur:
+            return None
+        cur = cur[name]
+        if idx is not None:
+            if not isinstance(cur, list) or int(idx) >= len(cur):
+                return None
+            cur = cur[int(idx)]
+    return cur
+
+
+def _retry_extract(
+    doc_id: str,
+    field_path: str,
+    row,
+    err: str,
+    schema_strict: type,
+    db: DB,
+    s: Settings,
+    client: ExtractorClient,
+) -> dict:
+    """Rilancia l'estrattore sul singolo campo con l'errore accodato al prompt.
+    Ritorna il nuovo leaf {value_json, quote, page_no, bbox, confidence};
+    in caso di risposta inutilizzabile, ricade sui valori precedenti."""
+    page_nos = [row["page_no"]] if row["page_no"] else [p["page_no"] for p in db.get_pages(doc_id)]
+    regions = [
+        {"region_id": r["region_id"], "type": r["region_type"], "text": r["text"]}
+        for pn in page_nos for r in db.get_canonical_regions(doc_id, pn)
+    ]
+    lines = ["REGIONI (id | tipo | testo):"]
+    lines += [f"[{r['region_id']}] {r['type']}: {r['text']}" for r in regions]
+    lines += [
+        "",
+        f"CAMPO DA ESTRARRE: {field_path}",
+        "",
+        "REGOLE:",
+        "- restituisci un oggetto {value, quote, page, bbox, confidence}.",
+        "- quote DEVE essere copiata carattere per carattere dal testo fornito sopra.",
+        "- null è la risposta corretta quando il dato non è presente.",
+        "",
+        f"IL TENTATIVO PRECEDENTE È FALLITO: {err}",
+        f"Valore precedente: {row['value_json']}  quote: {row['quote']}",
+        "Correggi: la nuova quote deve apparire verbatim nelle regioni fornite.",
+    ]
+    fallback = {"value_json": row["value_json"], "quote": row["quote"],
+                "page_no": row["page_no"], "bbox": _bbox(row),
+                "confidence": row["confidence"]}
+    try:
+        raw = client.extract("\n".join(lines),
+                             guided_json_schema=loose(schema_strict).model_json_schema())
+    except Exception as e:
+        log.warning("Retry extract fallito (%s): %s", field_path, e)
+        return fallback
+    leaf = _get_path(raw, field_path)
+    if not isinstance(leaf, dict) or ("value" not in leaf and "quote" not in leaf):
+        log.warning("Retry: campo %s assente nella risposta", field_path)
+        return fallback
+    return {
+        "value_json": json.dumps(leaf.get("value"), ensure_ascii=False)
+                      if leaf.get("value") is not None else None,
+        "quote": leaf.get("quote"),
+        "page_no": leaf.get("page", row["page_no"]),
+        "bbox": tuple(leaf["bbox"]) if isinstance(leaf.get("bbox"), (list, tuple))
+                and len(leaf["bbox"]) == 4 else _bbox(row),
+        "confidence": leaf.get("confidence", row["confidence"]),
+    }
 
 
 def _maybe_retry(
@@ -284,14 +549,15 @@ def _maybe_retry(
                              row["confidence"])
         db.set_status(doc_id, "needs_review")
         return False, attempt
-    # rilancia con errore accodato (stub: richiede il prompt originale; qui marchiamo
-    # solo un nuovo tentativo pending che la Fase 5 rieseguirà in un ciclo successivo)
+    # rilancia l'estrattore con l'errore accodato al prompt, poi rivalida
+    new = _retry_extract(doc_id, field_path, row, err, schema_strict, db, s, client)
     next_attempt = attempt + 1
-    db.upsert_extraction(doc_id, field_path, row["value_json"], row["quote"],
-                         row["page_no"], _bbox(row), next_attempt, "pending",
-                         row["confidence"])
-    log.info("Retry schedulato per %s (attempt %d, err=%s)", field_path, next_attempt, err)
-    return False, next_attempt
+    db.upsert_extraction(doc_id, field_path, new["value_json"], new["quote"],
+                         new["page_no"], new["bbox"], next_attempt, "pending",
+                         new["confidence"])
+    log.info("Retry %d per %s (err=%s)", next_attempt, field_path, err)
+    new_row = db.latest_extraction(doc_id, field_path)
+    return _validate_one(doc_id, field_path, new_row, schema_strict, db, s, client)
 
 
 def _bbox(row):

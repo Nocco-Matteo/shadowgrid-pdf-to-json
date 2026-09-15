@@ -132,38 +132,63 @@ def loose(model: type[BaseModel]) -> type[BaseModel]:
 # ---------------------------------------------------------------------------
 
 
-def flatten_extracted(obj: Any, prefix: str = "") -> list[dict[str, Any]]:
-    """Appiattisce uno schema di Extracted in righe (field_path, value_json, quote, page, bbox).
-    Salta i campi Extracted con value=None (dati assenti)."""
-    rows: list[dict[str, Any]] = []
+_EXTRACTED_KEYS = {"value", "quote"}
+
+
+def _leaf_row(obj: Any, prefix: str) -> list[dict[str, Any]]:
+    """Riga per un campo foglia (istanza Extracted o dict {value, quote, ...}).
+
+    I null espliciti del modello (value=null E quote=null) producono una riga
+    con value_json/quote NULL: è un'assenza DICHIARATA, distinta dal campo mai
+    prodotto (nessuna riga). Serve a valle per non confondere "il modello ha
+    verificato che il dato non c'è" con "l'estrazione è fallita"."""
     if isinstance(obj, Extracted):
-        if obj.value is None:
-            return rows  # dato assente: non produrre riga
-        rows.append({
-            "field_path": prefix.rstrip(".") or "<root>",
-            "value_json": json.dumps(obj.value, ensure_ascii=False),
-            "quote": obj.quote,
-            "page": obj.page,
-            "bbox": obj.bbox,
-            "confidence": obj.confidence,
-        })
-        return rows
+        value, quote, page = obj.value, obj.quote, obj.page
+        bbox, confidence = obj.bbox, obj.confidence
+    else:
+        value = obj.get("value")
+        quote = obj.get("quote")
+        page = obj.get("page")
+        bbox = obj.get("bbox")
+        confidence = obj.get("confidence", "high")
+    if value is None and quote is not None:
+        return []  # incoerente (value nullo, quote presente): scarta
+    return [{
+        "field_path": prefix.rstrip(".") or "<root>",
+        "value_json": json.dumps(value, ensure_ascii=False)
+                      if value is not None else None,
+        "quote": quote,
+        "page": page,
+        "bbox": bbox,
+        "confidence": confidence,
+    }]
+
+
+def _is_extracted_leaf_dict(obj: Any) -> bool:
+    return isinstance(obj, dict) and bool(_EXTRACTED_KEYS & obj.keys())
+
+
+def flatten_extracted(obj: Any, prefix: str = "") -> list[dict[str, Any]]:
+    """Appiattisce uno schema di Extracted (o il dict JSON equivalente prodotto
+    dall'estrattore) in righe (field_path, value_json, quote, page, bbox).
+    I null espliciti del foglio producono una riga con value_json=None
+    (assenza dichiarata); i campi mai presenti nel payload nessuna riga."""
+    if isinstance(obj, Extracted) or _is_extracted_leaf_dict(obj):
+        return _leaf_row(obj, prefix)
     if isinstance(obj, BaseModel):
-        for name, _fi in type(obj).model_fields.items():
-            val = getattr(obj, name)
-            child_prefix = f"{prefix}{name}."
-            if val is None:
-                continue
-            if isinstance(val, list):
-                for i, item in enumerate(val):
-                    rows.extend(flatten_extracted(item, f"{child_prefix}[{i}]."))
-            else:
-                rows.extend(flatten_extracted(val, child_prefix))
-        return rows
+        obj = {name: getattr(obj, name) for name in type(obj).model_fields}
     if isinstance(obj, dict):
+        rows: list[dict[str, Any]] = []
         for k, v in obj.items():
-            rows.extend(flatten_extracted(v, f"{prefix}{k}."))
-    return rows
+            if v is None:
+                continue
+            if isinstance(v, list):
+                for i, item in enumerate(v):
+                    rows.extend(flatten_extracted(item, f"{prefix}{k}[{i}]."))
+            else:
+                rows.extend(flatten_extracted(v, f"{prefix}{k}."))
+        return rows
+    return []
 
 
 __all__ = [

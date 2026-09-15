@@ -1,0 +1,46 @@
+# pipeline.yaml — configurazione della pipeline.
+#
+# Precedenza (dalla più forte): argomento esplicito > variabile d'ambiente
+# PIPELINE_* > .env > questo file > default in config.py.
+# Per usare un altro file: PIPELINE_CONFIG=/percorso/altra.yaml
+#
+# Nota: tutto gira dentro WSL2 (vLLM non supporta Windows nativo).
+
+# --- Modelli (ID HuggingFace, o nome servito dal server vLLM) ---
+model_a: "PaddlePaddle/PaddleOCR-VL-1.6"     # OCR primario, ~3GB VRAM
+model_b: "deepseek-ai/DeepSeek-OCR-2"        # OCR secondario, ~4GB VRAM
+extractor_model: "nicosuter/Qwen3.8-27B-AWQ" # estrattore, ~18GB VRAM + KV
+
+# --- Endpoint server vLLM (uno alla volta, fasi in serie) ---
+vllm_url: "http://127.0.0.1:8080/v1"
+ocr_a_url: "http://127.0.0.1:8080/v1"
+ocr_b_url: "http://127.0.0.1:8080/v1"
+extractor_url: "http://127.0.0.1:8080/v1"
+
+# --- Storage ---
+# db_path: "runs/pipeline.db"
+# work_dir: "runs/work"
+
+# --- Rasterizzazione ---
+# dpi: 300
+# dpi_degraded: 400
+# deskew_min_angle: 0.3
+
+# --- OCR / riconciliazione ---
+# iou_align_threshold: 0.5
+# text_conflict_threshold: 0.95
+# conflict_margin_px: 10
+# conflict_upscale: 2
+# conflict_rate_warn: 0.05
+
+# --- Estrazione ---
+# extractor_temperature: 0.0
+# extractor_seed: 12345
+# max_fields_per_task: 8
+
+# --- Validazione ---
+# grounding_threshold: 90
+# max_retries: 2
+
+# --- Run ---
+# git_sha: "unknown"

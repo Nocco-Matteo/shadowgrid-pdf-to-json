@@ -1,11 +1,23 @@
-"""Configurazione via variabili d'ambiente (pydantic-settings)."""
+"""Configurazione: pipeline.yaml < .env < env PIPELINE_* < argomenti espliciti.
+
+Il file YAML di default è ``pipeline.yaml`` nella working directory;
+``PIPELINE_CONFIG=/path/altro.yaml`` per puntare altrove.
+"""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
+
+DEFAULT_CONFIG_FILE = "pipeline.yaml"
 
 
 class Settings(BaseSettings):
@@ -15,6 +27,24 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        yaml_file = os.environ.get("PIPELINE_CONFIG", DEFAULT_CONFIG_FILE)
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            YamlConfigSettingsSource(settings_cls, yaml_file=yaml_file),
+            file_secret_settings,
+        )
 
     # Storage
     db_path: Path = Field(default=Path("runs/pipeline.db"))
@@ -46,7 +76,6 @@ class Settings(BaseSettings):
     extractor_temperature: float = 0.0
     extractor_seed: int = 12345
     max_fields_per_task: int = 8
-    max_field_per_task_min: int = 5
 
     # Validazione
     grounding_threshold: int = 90

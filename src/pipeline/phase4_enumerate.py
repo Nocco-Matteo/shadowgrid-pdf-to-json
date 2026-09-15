@@ -8,6 +8,10 @@ Per ogni campo di tipo lista, una chiamata dedicata che restituisce solo l'inven
 
 - anchor è una stringa verbatim che identifica univocamente l'inizio dell'elemento.
 - Verifica ogni anchor contro il testo OCR. Anchor non trovata -> elemento scartato.
+- Il prompt elenca le regioni con i loro id (il modello può selezionarli);
+  i region_ids restituiti vengono validati contro le regioni reali della pagina
+  (un id inventato non può selezionare contesto inesistente) e PERSISTITI
+  nell'inventario: la Fase 5 li usa per restringere il contesto dell'elemento.
 - Controllo di copertura indipendente: conta righe tabella / occorrenze pattern
   numerazione / intestazioni sezione. Se il conteggio non torna -> revisione.
 - Deduplica per anchor normalizzata.
@@ -51,26 +55,39 @@ def run(
     di una tabella contato a parte). Se fornito e discordante -> il documento va
     in needs_review (la funzione ritorna gli item trovati ma logga un warning e
     imposta lo stato a needs_review).
+
+    Rieseguibile anche da needs_review (es. dopo un mismatch di copertura):
+    l'inventario viene ricalcolato da zero.
     """
     s = settings or get_settings()
     db = db or DB(s)
-    if db.get_status(doc_id) != "reconciled":
-        # ammesso anche da 'enumerated' per ri-esecuzione
-        st = db.get_status(doc_id)
-        if st not in {"reconciled", "enumerated"}:
-            raise ValueError(f"Enumerate richiede reconciled, trovato {st}")
+    st = db.get_status(doc_id)
+    if st is None:
+        raise ValueError(f"Documento {doc_id} sconosciuto")
+    if st in {"extracted", "validated", "done"}:
+        return []  # già oltre l'enumerazione
+    if st not in {"reconciled", "enumerated", "needs_review"}:
+        raise ValueError(f"Enumerate richiede reconciled, trovato {st}")
 
     client = client or ExtractorClient(s.extractor_url, s.extractor_model)
 
-    # Costruisci il prompt di enumerazione usando il full_text di tutte le pagine
+    # Contesto: testo canonico per pagina + regioni con i loro ID. Senza gli
+    # ID visibili nel prompt il modello non può selezionare region_ids in modo
+    # affidabile (inventerebbe numeri plausibili).
     pages = db.get_pages(doc_id)
-    context = "\n\n".join(
-        f"=== PAGE {p['page_no']} ===\n{p['full_text'] or ''}" for p in pages
-    )
+    page_parts = []
+    for p in pages:
+        lines = [f"=== PAGE {p['page_no']} ===", "REGIONI (id | tipo | testo):"]
+        for r in db.get_canonical_regions(doc_id, p["page_no"]):
+            lines.append(f"[{r['region_id']}] {r['region_type']}: {r['text']}")
+        page_parts.append("\n".join(lines))
+    context = "\n\n".join(page_parts)
     prompt = (
         f"Elenca SOLO gli elementi della lista '{list_field_path}' presenti nel documento.\n"
         f"Per ogni elemento restituisci anchor (stringa verbatim che identifica univocamente "
         f"l'inizio dell'elemento), page (numero pagina) e region_ids (lista di id regione).\n"
+        f"Gli id regione sono quelli tra parentesi quadre nell'elenco REGIONI: usa SOLO "
+        f"quelli elencati per la pagina dell'elemento.\n"
         f"Non estrarre i valori dei campi, solo l'inventario.\n"
         f"Output JSON: {{\"items\": [{{\"anchor\": \"...\", \"page\": 3, \"region_ids\": [12]}}]}}\n\n"
         f"{context}\n"
@@ -104,17 +121,24 @@ def run(
         page_no = it.get("page")
         if not anchor:
             continue
-        page_row = db.get_page(doc_id, page_no) if page_no else None
-        full_text = page_row["full_text"] if page_row else ""
-        score = partial_ratio(normalize(anchor), normalize(full_text or ""))
+        page_text = db.get_page_text(doc_id, page_no) if page_no else ""
+        score = partial_ratio(normalize(anchor), normalize(page_text or ""))
         if score < 90:
             log.warning("Anchor non trovata nel testo (score=%d): %r -> scartata", score, anchor)
             continue
+        # region_ids validati contro le regioni reali della pagina
+        valid_ids: set[int] = set()
+        if page_no:
+            valid_ids = {r["region_id"] for r in db.get_regions(doc_id, page_no, engine="a")}
+        region_ids = [rid for rid in (it.get("region_ids") or []) if rid in valid_ids]
+        if it.get("region_ids") and not region_ids:
+            log.warning("region_ids inventati per %r: nessun id valido -> contesto pagina",
+                        anchor)
         key = normalize(anchor)
         if key in seen_anchors:
             continue  # deduplica
         seen_anchors.add(key)
-        items.append(ListItem(anchor=anchor, page=page_no, region_ids=it.get("region_ids", [])))
+        items.append(ListItem(anchor=anchor, page=page_no, region_ids=region_ids))
 
     # Controllo di copertura indipendente
     if expected_count is not None and expected_count != len(items):
@@ -128,8 +152,11 @@ def run(
     db.upsert_extraction(
         doc_id=doc_id,
         field_path=f"{list_field_path}$inventory",
-        value_json=json.dumps([{"anchor": it.anchor, "page": it.page} for it in items],
-                              ensure_ascii=False),
+        value_json=json.dumps(
+            [{"anchor": it.anchor, "page": it.page, "region_ids": it.region_ids}
+             for it in items],
+            ensure_ascii=False,
+        ),
         quote=None,
         page_no=None,
         bbox=None,
@@ -139,8 +166,12 @@ def run(
     )
 
     # Stato: reconciled -> enumerated (solo se non già needs_review)
-    if db.get_status(doc_id) == "reconciled":
+    st = db.get_status(doc_id)
+    if st == "reconciled":
         db.transition(doc_id, "reconciled", "enumerated")
+    elif st == "needs_review" and expected_count == len(items):
+        # la ripetizione ha risolto il motivo della revisione
+        db.set_status(doc_id, "enumerated")
 
     return items
 

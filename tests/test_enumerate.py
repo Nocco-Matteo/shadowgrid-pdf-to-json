@@ -1,6 +1,8 @@
 """Test di phase4_enumerate.py con client stub."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from pipeline.config import Settings
@@ -67,3 +69,32 @@ def test_enumerate_coverage_mismatch_needs_review(db):
     ]})
     run("doc_a", "parties", db=db, client=client, expected_count=5)
     assert db.get_status("doc_a") == "needs_review"
+
+
+def test_enumerate_persists_validated_region_ids(db):
+    """I region_ids tornati dal modello vengono validati contro le regioni reali
+    e PERSISTITI nell'inventario: la Fase 5 li usa per restringere il contesto."""
+    db.add_region("doc_a", 1, (0, 0, 10, 10), "text", "Contratto n. 44/B", "a", 0)
+    db.add_region("doc_a", 1, (0, 20, 10, 30), "text", "Parti: ACME", "a", 1)
+    client = StubExtractor({"items": [
+        # id valido (1), id inventato (99) -> quest'ultimo scartato
+        {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": [1, 99]},
+    ]})
+    items = run("doc_a", "parties", db=db, client=client)
+    assert items[0].region_ids == [1]
+    inv = db.latest_extraction("doc_a", "parties$inventory")
+    assert inv is not None
+    assert json.loads(inv["value_json"])[0]["region_ids"] == [1]
+
+
+def test_enumerate_recoverable_from_needs_review(db):
+    """Da needs_review (mismatch di copertura) si può rieseguire l'enumerazione:
+    se ora la copertura torna, il documento riprende il flusso."""
+    client = StubExtractor({"items": [
+        {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": []},
+    ]})
+    run("doc_a", "parties", db=db, client=client, expected_count=5)
+    assert db.get_status("doc_a") == "needs_review"
+    items = run("doc_a", "parties", db=db, client=client, expected_count=1)
+    assert len(items) == 1
+    assert db.get_status("doc_a") == "enumerated"

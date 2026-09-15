@@ -3,8 +3,16 @@
 Pipeline di estrazione strutturata da scansioni PDF → JSON nidificato con citazione
 verificabile per ogni valore. Implementazione di `pipeline-estrazione-spec.md.pdf`.
 
-Target: Ryzen 9 7950X, RTX 4090 (24GB), 32GB RAM. Fasi in serie (vLLM si spegne/riparte
-tra fasi); stato su SQLite WAL → kill & resume sicuro.
+Target: Windows + Ryzen 9 7950X + RTX 4090 (24GB), 32GB RAM — **tutto gira dentro WSL2** (vLLM non
+supporta Windows nativo; setup via `setup_windows.ps1` → `setup_inner.sh`).
+Fasi in serie (vLLM si spegne/riparte tra fasi); stato su SQLite WAL → kill & resume
+sicuro.
+
+## Configurazione
+
+`pipeline.yaml` — nomi dei modelli (ID HuggingFace), endpoint vLLM, soglie, DPI.
+Precedenza: argomento > env `PIPELINE_*` > `.env` > `pipeline.yaml` > default.
+File alternativo: `PIPELINE_CONFIG=/path/altro.yaml`.
 
 ## Quickstart
 

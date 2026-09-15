@@ -28,3 +28,5 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+log_cli = true
+log_cli_level = "INFO"

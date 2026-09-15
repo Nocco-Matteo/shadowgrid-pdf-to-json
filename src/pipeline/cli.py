@@ -115,26 +115,33 @@ def cmd_extract(args) -> None:
 def cmd_validate(args) -> None:
     s = get_settings()
     db = DB(s)
-    for doc_id in _resolve_doc_ids(args, db):
-        phase6_validate.run(doc_id, DEFAULT_SCHEMA, db=db, settings=s)
+    # I retry di Fase 6 rilanciano l'estrattore via HTTP: il server deve essere
+    # vivo durante la validazione (altrimenti ogni retry è destinato a fallire
+    # e ricade sul valore precedente fino a esaurire i tentativi).
+    runner = VLLMRunner(s)
+    s.extractor_url = runner.start(s.extractor_model, port=8080, phase="extract")
+    try:
+        for doc_id in _resolve_doc_ids(args, db):
+            phase6_validate.run(doc_id, DEFAULT_SCHEMA, db=db, settings=s)
+    finally:
+        runner.stop()
 
 
 def cmd_review(args) -> None:
     db = DB()
     for doc_id in _resolve_doc_ids(args, db):
-        phase7_review.launch_ui(doc_id, db=db)
+        phase7_review.launch_ui(doc_id, db=db, schema_strict=DEFAULT_SCHEMA)
 
 
 def cmd_eval(args) -> None:
     db = DB()
+    prev = db.last_run()  # prima di evaluate(), che registra la run corrente
     m = phase8_eval.evaluate(args.gold_dir, db=db, split=args.split)
     phase8_eval.print_metrics(m)
-    if args.compare_last and db.last_run():
-        prev = db.last_run()
-        if prev["run_id"] != m.run_id:
-            delta = phase8_eval.compare_runs(db, prev["run_id"], m.run_id)
-            print("\n=== Delta vs run precedente ===")
-            print(json.dumps(delta, indent=2, ensure_ascii=False))
+    if args.compare_last and prev and prev["run_id"] != m.run_id:
+        delta = phase8_eval.compare_runs(db, prev["run_id"], m.run_id)
+        print("\n=== Delta vs run precedente ===")
+        print(json.dumps(delta, indent=2, ensure_ascii=False))
 
 
 def cmd_run(args) -> None:
@@ -165,30 +172,28 @@ def cmd_run(args) -> None:
                 phase3_ocr_b.run(doc_id, db=db, settings=s)
         finally:
             runner.stop()
+    else:
+        # senza secondo OCR: ocr_a -> reconciled
+        for p in args.paths:
+            doc_id = phase1_ingest.ingest(Path(p), db=db)
+            if db.get_status(doc_id) == "ocr_a":
+                db.transition(doc_id, "ocr_a", "reconciled")
 
-    # Enumerate (liste)
-    s.extractor_url = runner.start(s.extractor_model, port=8080, phase="enumerate")
+    # Enumerate + Extract + Validate (stesso modello: un solo avvio del server).
+    # La validazione avviene con il server ancora attivo: i retry di Fase 6
+    # rilanciano l'estrattore via HTTP.
+    s.extractor_url = runner.start(s.extractor_model, port=8080, phase="extract")
     try:
         for p in args.paths:
             doc_id = phase1_ingest.ingest(Path(p), db=db)
             for lf in args.list_fields or []:
                 phase4_enumerate.run(doc_id, lf, db=db, settings=s)
-    finally:
-        runner.stop()
-
-    # Extract
-    s.extractor_url = runner.start(s.extractor_model, port=8080, phase="extract")
-    try:
+            phase5_extract.run(doc_id, schema, db=db, settings=s)
         for p in args.paths:
             doc_id = phase1_ingest.ingest(Path(p), db=db)
-            phase5_extract.run(doc_id, schema, db=db, settings=s)
+            phase6_validate.run(doc_id, schema, db=db, settings=s)
     finally:
         runner.stop()
-
-    # Validate (CPU)
-    for p in args.paths:
-        doc_id = phase1_ingest.ingest(Path(p), db=db)
-        phase6_validate.run(doc_id, schema, db=db, settings=s)
 
 
 def _resolve_doc_ids(args, db: DB) -> list[str]:

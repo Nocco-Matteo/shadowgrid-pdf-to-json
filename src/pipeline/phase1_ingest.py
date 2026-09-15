@@ -104,10 +104,10 @@ def _hough_angle(img_gray: Any) -> float:
         angles.append(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
     if not angles:
         return 0.0
-    # Le linee di testo sono ~orizzontali -> angolo vicino 0 (mod 180)
+    # Le linee di testo sono ~orizzontali -> riporta la mediana in [-45, 45)
     import statistics
 
-    return statistics.median(angles) % 90 - 45  # approssimazione
+    return (statistics.median(angles) + 45) % 90 - 45
 
 
 def rotate_image(img: Any, angle: float) -> Any:
@@ -158,14 +158,14 @@ def rasterize(
     degraded: bool = False,
 ) -> None:
     """Rasterizza tutte le pagine non ancora processate, deskew+normalizza, salva PNG."""
+    from .db import skip_if_done
+
     s = settings or get_settings()
     db = db or DB(s)
-    doc = db.get_document(doc_id)
-    if doc is None:
-        raise ValueError(f"Documento {doc_id} sconosciuto")
-    if db.get_status(doc_id) == "rasterized":
+    if skip_if_done(db, doc_id, "ingested", "rasterized"):
         log.info("Già rasterizzato: %s", doc_id)
         return
+    doc = db.get_document(doc_id)
 
     dpi = s.dpi_degraded if degraded else s.dpi
     work = Path(s.work_dir) / doc_id

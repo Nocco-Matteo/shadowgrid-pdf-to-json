@@ -58,3 +58,36 @@ def test_print_metrics(db, gold, capsys):
     print_metrics(m)
     out = capsys.readouterr().out
     assert "Silent error rate" in out
+
+
+def test_evaluate_penalizes_invented_fields(db, gold):
+    """Un campo predetto MAI atteso dal gold è un falso positivo: senza questo
+    controllo, precision/recall restano 1.0 anche con elementi inventati."""
+    db.upsert_document("doc_a", "/a.pdf", "sha", 1)
+    db.upsert_extraction("doc_a", "contract_number", '"44/B"', "44/B", 1, None, 1, "validated", "high")
+    db.upsert_extraction("doc_a", "amount_eur", "1234.5", "1.234,50", 1, None, 1, "validated", "high")
+    # campo completamente inventato (con confidence alta -> errore silenzioso)
+    db.upsert_extraction("doc_a", "parties[0].name", '"Pippo Inventato"', "Pippo", 1,
+                         None, 1, "validated", "high")
+    m = evaluate(gold, db=db, split="sealed")
+    by_path = {f.field_path: f for f in m.fields}
+    assert by_path["parties[0].name"].precision == 0.0
+    assert by_path["parties[0].name"].n == 0
+    # la parte corretta resta corretta
+    assert by_path["contract_number"].precision == 1.0
+    assert by_path["contract_number"].recall == 1.0
+    # l'invenzione high-confidence conta come errore silenzioso
+    assert m.silent_error_rate > 0.0
+
+
+def test_evaluate_uses_latest_attempt(db, gold):
+    """Un retry che peggiora le cose: vale l'ultimo tentativo, non il vecchio
+    validated."""
+    db.upsert_document("doc_a", "/a.pdf", "sha", 1)
+    db.upsert_extraction("doc_a", "contract_number", '"44/B"', "44/B", 1, None, 1, "validated", "high")
+    db.upsert_extraction("doc_a", "contract_number", '"99/Z"', "pippo", 1, None, 2,
+                         "needs_review", "high")
+    db.upsert_extraction("doc_a", "amount_eur", "1234.5", "1.234,50", 1, None, 1, "validated", "high")
+    m = evaluate(gold, db=db, split="sealed")
+    by_path = {f.field_path: f for f in m.fields}
+    assert by_path["contract_number"].recall == 0.0

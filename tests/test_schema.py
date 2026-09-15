@@ -61,5 +61,15 @@ def test_flatten_extracted_nested():
     paths = [r["field_path"] for r in rows]
     assert "name" in paths
     assert "role" in paths
-    # vat_id è None -> non appare
-    assert "vat_id" not in paths
+    # il null esplicito produce una riga (assenza DICHIARATA), con
+    # value_json=None: distinta dal campo mai prodotto
+    assert "vat_id" in paths
+    vat_row = next(r for r in rows if r["field_path"] == "vat_id")
+    assert vat_row["value_json"] is None
+    assert vat_row["quote"] is None
+
+
+def test_flatten_omitted_field_no_row():
+    # campo mai presente nel payload -> nessuna riga (vs null esplicito)
+    rows = flatten_extracted({"name": {"value": "ACME", "quote": "ACME"}})
+    assert [r["field_path"] for r in rows] == ["name"]

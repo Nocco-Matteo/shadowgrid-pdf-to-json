@@ -9,6 +9,17 @@ Confronto similarità normalizzata:
   - < 0.95  -> conflitto.
 Risoluzione: ritaglia bbox unione + ~10px margine, upscale 2x, rileggi con terzo
 passaggio mirato. Maggioranza 2-su-3. Se tutti divergono -> confidence='low' e coda umana.
+
+Il testo vincitore NON viene solo archiviato in region_conflicts: la colonna
+regions.text_canonical (e pages.canonical_text, ricostruito per pagina) diventa
+la rappresentazione canonica usata da tutte le fasi a valle (Fase 4/5/6 e
+revisione). Gli originali A/B restano in regions.text.
+
+Kill-safe: le regioni B di una pagina vengono scritte in una transazione unica
+marcata da pages.ocr_b_done; conflitto e testo canonico vengono scritti nella
+STESSA transazione; i conflitti già registrati non vengono risolti una seconda
+volta al resume (ma le risoluzioni persistite vengono riapplicate al canonico,
+per riparare interruzioni di versioni precedenti).
 """
 
 from __future__ import annotations
@@ -34,34 +45,53 @@ def run(
 ) -> None:
     s = settings or get_settings()
     db = db or DB(s)
-    if db.get_status(doc_id) == "ocr_b":
-        log.info("OCR B già fatto: %s", doc_id)
+    st = db.get_status(doc_id)
+    if st in ("reconciled", "enumerated", "extracted", "validated", "done",
+              "needs_review"):
+        log.info("OCR B/reconcile già fatto: %s", doc_id)
         return
-    if db.get_status(doc_id) != "ocr_a":
-        raise ValueError(f"OCR B richiede stato ocr_a, trovato {db.get_status(doc_id)}")
+    if st not in ("ocr_a", "ocr_b"):
+        raise ValueError(f"OCR B richiede stato ocr_a, trovato {st}")
 
     client_b = client_b or DeepSeekOCRClient(s.ocr_b_url, s.model_b)
     resolver = resolver or ResolverClient(s.ocr_b_url, s.model_b)
+
+    # Conflitti già registrati in run precedenti (idempotenza del resume)
+    recorded = {c["region_id"] for c in db.get_conflicts(doc_id)}
+    # Ripara risoluzioni registrate ma non applicate al testo canonico
+    # (interruzioni tra le due scritture in versioni precedenti): riapplica
+    # le risoluzioni persistite, in un'unica transazione ciascuna.
+    for c in db.get_conflicts(doc_id):
+        if c["resolver"] in ("majority", "human") and c["region_id"]:
+            db.apply_conflict_resolution(
+                doc_id, c["region_id"], None, None,
+                c["resolved_text"], c["resolver"],
+            )
 
     total_regions = 0
     conflict_count = 0
 
     for page in db.get_pages(doc_id):
         page_no = page["page_no"]
-        if db.get_regions(doc_id, page_no, engine="b"):
-            continue  # idempotente
+        if page["ocr_b_done"]:
+            regions_b = _rows_to_regions(
+                db.get_regions(doc_id, page_no, engine="b"), page_no
+            )  # già scritta (commit atomico), niente re-OCR
+        else:
+            regions_b = client_b.ocr_page(page["image_path"], page_no)
+            db.save_page_ocr_b(doc_id, page_no, regions_b)
+            regions_b = _rows_to_regions(
+                db.get_regions(doc_id, page_no, engine="b"), page_no
+            )
 
         regions_a = _rows_to_regions(db.get_regions(doc_id, page_no, engine="a"), page_no)
-        regions_b = client_b.ocr_page(page["image_path"], page_no)
-
-        # Scrivi regioni B
-        for r in regions_b:
-            db.add_region(doc_id, page_no, r.bbox, r.region_type, r.text, "b", r.order_idx)
-
         total_regions += len(regions_a)
         conflict_count += _reconcile_page(
-            db, doc_id, page_no, regions_a, regions_b, page["image_path"], resolver, s
+            db, doc_id, page_no, regions_a, regions_b, page["image_path"], resolver, s,
+            recorded,
         )
+        # Il testo canonico della pagina riflette le risoluzioni majority
+        db.rebuild_page_canonical_text(doc_id, page_no)
 
     rate = conflict_count / total_regions if total_regions else 0.0
     if rate > s.conflict_rate_warn:
@@ -70,7 +100,9 @@ def run(
             rate * 100, s.conflict_rate_warn * 100,
         )
 
-    db.transition(doc_id, "ocr_a", "ocr_b")
+    if db.get_status(doc_id) == "ocr_a":
+        db.transition(doc_id, "ocr_a", "ocr_b")
+    db.transition(doc_id, "ocr_b", "reconciled")
 
 
 def _rows_to_regions(rows, page_no: int) -> list[Region]:
@@ -80,7 +112,8 @@ def _rows_to_regions(rows, page_no: int) -> list[Region]:
     for r in rows:
         bbox = tuple(json.loads(r["bbox"])) if r["bbox"] else None
         out.append(Region(page_no=page_no, bbox=bbox, region_type=r["region_type"],
-                          text=r["text"], order_idx=r["order_idx"]))
+                          text=r["text"], order_idx=r["order_idx"],
+                          region_id=r["region_id"]))
     return out
 
 
@@ -93,6 +126,7 @@ def _reconcile_page(
     image_path: str,
     resolver: ResolverClient,
     s: Settings,
+    recorded: set[int],
 ) -> int:
     """Riconcilia le due segmentazioni di una pagina. Ritorna il numero di conflitti."""
     paired_b = [False] * len(regions_b)
@@ -115,7 +149,8 @@ def _reconcile_page(
                 continue  # accetta A
             # conflitto -> risoluzione
             conflicts += 1
-            _resolve_conflict(db, doc_id, page_no, ra, rb, image_path, resolver, s)
+            _resolve_conflict(db, doc_id, page_no, ra, rb, image_path, resolver, s,
+                              recorded)
             continue
 
         # 2) non appaiata per IoU -> allineamento per contenuto
@@ -143,14 +178,18 @@ def _resolve_conflict(
     image_path: str,
     resolver: ResolverClient,
     s: Settings,
+    recorded: set[int],
 ) -> None:
     """Ritaglia bbox unione + margine, upscale 2x, rileggi. Maggioranza 2-su-3."""
+    if ra.region_id and ra.region_id in recorded:
+        return  # già risolto in un run precedente (resume)
+
     import cv2
 
     bbox_u = union_bbox(ra.bbox, rb.bbox) if ra.bbox and rb.bbox else (ra.bbox or rb.bbox)
     if bbox_u is None:
         # senza bbox non possiamo ritagliare; teniamo A e marchiamo conflitto low
-        db.add_conflict(0, ra.text, rb.text, ra.text, "fallback_a")
+        db.add_conflict(doc_id, ra.region_id or 0, ra.text, rb.text, ra.text, "fallback_a")
         return
 
     img = cv2.imread(image_path, cv2.IMREAD_COLOR)
@@ -180,13 +219,18 @@ def _resolve_conflict(
         resolved = winner
         resolver_name = "majority"
     else:
-        # tutti divergenti
-        resolved = ra.text  # fallback al primario
+        # tutti divergenti: fallback al primario, ma il conflitto finisce nella
+        # coda umana (Fase 7 pesca i resolver divergent_low/fallback_a)
+        resolved = ra.text
         resolver_name = "divergent_low"
-        # TODO: marca la regione/estrazione come confidence='low' per la coda umana
 
-    # Trova un region_id per registrare il conflitto (usa la prima regione A di questa pagina)
-    db.add_conflict(0, ra.text, rb.text, resolved, resolver_name)
+    # Conflitto + testo canonico (regione e pagina) in UNA transazione:
+    # un'interruzione non può lasciare il conflitto registrato con un
+    # canonico stantio che al resume non verrebbe più corretto.
+    db.apply_conflict_resolution(
+        doc_id, ra.region_id or 0, ra.text, rb.text, resolved, resolver_name,
+        page_no=page_no,
+    )
 
 
 __all__ = ["run"]

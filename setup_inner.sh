@@ -1,17 +1,45 @@
 #!/bin/bash
 # setup_inner.sh — lanciato da setup_windows.ps1 dentro Ubuntu-22.04.
 # Non lanciarlo a mano; usa setup_windows.ps1 da PowerShell.
-set -e
+# Argomento $1 (opzionale): path WSL del repo su Windows, es. /mnt/c/.../repo.
+# Se presente, i sorgenti vengono copiati da lì (stessa versione del tuo checkout);
+# altrimenti fallback a git clone da GitHub.
+#
+# -e -u -o pipefail: qualunque fallimento (anche dentro pipe, es. pytest | tail)
+# termina lo script con codice non-zero e setup_windows.ps1 si ferma.
+set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 
 echo "  [3a] Dipendenze sistema..."
 sudo apt update -y
-sudo apt install -y build-essential python3 python3-venv python3-pip git curl wget
+sudo apt install -y build-essential git curl wget rsync \
+  software-properties-common
+
+# Ubuntu 22.04 (jammy) ships Python 3.10 di default, ma il progetto richiede
+# >= 3.11 (pyproject.toml). Installa esplicitamente 3.11 dai deadsnakes PPA.
+echo ""
+echo "  [3a-bis] Python 3.11 (il default di Ubuntu 22.04 è 3.10, troppo vecchio)..."
+if ! command -v python3.11 >/dev/null 2>&1; then
+  sudo add-apt-repository -y ppa:deadsnakes/ppa
+  sudo apt update -y
+  sudo apt install -y python3.11 python3.11-venv python3.11-dev
+fi
+PY="$(command -v python3.11)"
+echo "    Interprete: $PY ($("$PY" --version 2>&1))"
 
 echo ""
 echo "  [3b] Repo..."
 REPO_DIR="$HOME/shadowgrid-pdf-to-json"
-if [ -d "$REPO_DIR" ]; then
+SRC_DIR="${1:-}"
+if [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ]; then
+  echo "    Copia da checkout Windows: $SRC_DIR"
+  mkdir -p "$REPO_DIR"
+  rsync -a --delete \
+    --exclude '.venv' --exclude '.git' --exclude 'runs' \
+    --exclude '__pycache__' --exclude '*.egg-info' --exclude '.pytest_cache' \
+    "$SRC_DIR/" "$REPO_DIR/"
+  cd "$REPO_DIR"
+elif [ -d "$REPO_DIR" ]; then
   cd "$REPO_DIR"
   git pull --rebase || echo "  git pull fallito, continuo"
 else
@@ -20,8 +48,16 @@ else
 fi
 
 echo ""
-echo "  [3c] Ambiente Python..."
-python3 -m venv .venv
+echo "  [3c] Ambiente Python ($PY)..."
+if [ -x ".venv/bin/python" ] && .venv/bin/python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
+  echo "    Riuso venv esistente ($(.venv/bin/python --version 2>&1))"
+else
+  if [ -d ".venv" ]; then
+    echo "    venv esistente con Python troppo vecchio ($(.venv/bin/python --version 2>&1)): lo ricreo"
+    rm -rf .venv
+  fi
+  "$PY" -m venv .venv
+fi
 source .venv/bin/activate
 pip install --upgrade pip wheel
 
@@ -48,7 +84,9 @@ mkdir -p data/pdfs
 PDF_FOUND=0
 for dir in "/mnt/c" "/mnt/d" "/mnt/e"; do
   if [ -d "$dir" ]; then
-    FOUND=$(find "$dir" -maxdepth 6 -iname "*.pdf" 2>/dev/null | grep -iE "dnd|d&d|player.*handbook|dungeon.*master|monster|dragon|giant|mimic|mordenkainen|tome|fizban|bigby" | head -20)
+    # || true: find/grep possono ricevere SIGPIPE da head; un output vuoto
+    # (grep senza match) non deve abortire lo script.
+    FOUND=$(find "$dir" -maxdepth 6 -iname "*.pdf" 2>/dev/null | grep -iE "dnd|d&d|player.*handbook|dungeon.*master|monster|dragon|giant|mimic|mordenkainen|tome|fizban|bigby" | head -20 || true)
     if [ -n "$FOUND" ]; then
       echo "    Trovati PDF:"
       echo "$FOUND"
@@ -69,6 +107,7 @@ echo ""
 echo "  [3f] Verifica..."
 cd "$REPO_DIR"
 source .venv/bin/activate
+# con pipefail: se pytest/ruff falliscono, lo script esce non-zero
 pytest -q 2>&1 | tail -3
 ruff check src tests 2>&1 | tail -1
 

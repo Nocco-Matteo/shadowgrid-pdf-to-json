@@ -79,6 +79,7 @@ def evaluate(
     em: dict[str, int] = {}
     n: dict[str, int] = {}
     silent: dict[str, int] = {}
+    extra_total = 0
 
     for doc_id in doc_ids:
         ann_path = gold_dir / "annotations" / f"{doc_id}.json"
@@ -88,11 +89,15 @@ def evaluate(
         ann = json.loads(ann_path.read_text())
         ann_flat = _flatten_annotation(ann)
 
-        extractions = {e["field_path"]: e for e in db.get_extractions(doc_id, status="validated")}
+        # ultimo tentativo per campo; un tentativo più recente non validato
+        # (rejected/needs_review) non conta come valore prodotto
+        extractions = {e["field_path"]: e for e in db.latest_extractions(doc_id)}
         for fp_path, expected in ann_flat.items():
             n[fp_path] = n.get(fp_path, 0) + 1
             got_row = extractions.get(fp_path)
             got = json.loads(got_row["value_json"]) if got_row and got_row["value_json"] else None
+            if got_row is not None and got_row["status"] != "validated":
+                got = None
             if _norm_value(got) == _norm_value(expected):
                 tp[fp_path] = tp.get(fp_path, 0) + 1
                 em[fp_path] = em.get(fp_path, 0) + 1
@@ -105,23 +110,41 @@ def evaluate(
                 if expected is not None:
                     fn[fp_path] = fn.get(fp_path, 0) + 1
 
+        # campi predetti NON attesi dal gold: elementi inventati. Vanno
+        # contati come falsi positivi, altrimenti precision/recall restano
+        # a 1.0 anche aggiungendo campi immaginari.
+        for fp_path, e in extractions.items():
+            if fp_path in ann_flat or "$" in fp_path:
+                continue  # atteso, o metadato (inventari Fase 4)
+            if e["status"] != "validated":
+                continue
+            got = json.loads(e["value_json"]) if e["value_json"] else None
+            if got is None:
+                continue  # assenza dichiarata, non un'invenzione
+            fp[fp_path] = fp.get(fp_path, 0) + 1
+            extra_total += 1
+            if e["confidence"] == "high":
+                silent[fp_path] = silent.get(fp_path, 0) + 1
+
     fields: list[FieldMetrics] = []
     total_silent = 0
     total_n = 0
-    for fp_path in sorted(n):
+    for fp_path in sorted(set(n) | set(fp)):
         t = tp.get(fp_path, 0)
         f_pos = fp.get(fp_path, 0)
         f_neg = fn.get(fp_path, 0)
         prec = t / (t + f_pos) if (t + f_pos) else 1.0
         rec = t / (t + f_neg) if (t + f_neg) else 1.0
-        em_rate = em.get(fp_path, 0) / n[fp_path] if n[fp_path] else 0.0
+        em_rate = em.get(fp_path, 0) / n[fp_path] if n.get(fp_path) else 0.0
         sil = silent.get(fp_path, 0)
-        fields.append(FieldMetrics(fp_path, prec, rec, em_rate, n[fp_path], sil))
+        fields.append(FieldMetrics(fp_path, prec, rec, em_rate, n.get(fp_path, 0), sil))
         total_silent += sil
-        total_n += n[fp_path]
+        total_n += n.get(fp_path, 0)
 
+    # denominatore: tutte le predizioni valutate (attese + inventate)
+    den = total_n + extra_total
     metrics = RunMetrics(run_id=0, fields=fields,
-                         silent_error_rate=total_silent / total_n if total_n else 0.0)
+                         silent_error_rate=total_silent / den if den else 0.0)
 
     # Registra run
     run_id = db.start_run(s.git_sha, s.extractor_model, prompt_version="v1")

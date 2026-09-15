@@ -19,7 +19,9 @@ def _aabb(points: list[tuple[float, float]]) -> BBox:
 
 
 def rotate_bbox(bbox: BBox, angle_deg: float, img_w: int, img_h: int) -> BBox:
-    """Ruota una bbox attorno al centro dell'immagine di `angle_deg` (gradi).
+    """Ruota una bbox attorno al centro dell'immagine di `angle_deg` (gradi),
+    in convenzione matematica (antioraria con y verso l'alto). Attenzione: è
+    la rotazione OPPOSTA a cv2.getRotationMatrix2D con lo stesso angolo.
     Restituisce l'AABB del rettangolo ruotato."""
     if angle_deg == 0.0:
         return bbox
@@ -37,11 +39,20 @@ def rotate_bbox(bbox: BBox, angle_deg: float, img_w: int, img_h: int) -> BBox:
 def invert_deskew_bbox(
     bbox: BBox, deskew_angle: float, img_w: int, img_h: int
 ) -> BBox:
-    """Riproietta una bbox (sull'immagine deskewed) sulle coordinate dell'immagine
-    originale invertendo la rotazione di deskew applicata in Fase 1."""
-    # Se in Fase 1 abbiamo ruotato l'immagine di +deskew_angle per raddrizzarla,
-    # per tornare alle coordinate originali applichiamo la rotazione opposta.
-    return rotate_bbox(bbox, -deskew_angle, img_w, img_h)
+    """Riproietta una bbox (sull'immagine deskewed, cioè ruotata in Fase 1 con
+    cv2.getRotationMatrix2D(center, deskew_angle)) sulle coordinate
+    dell'immagine originale.
+
+    cv2.getRotationMatrix2D(θ) mappa (dx,dy) -> (cos·dx + sin·dy, -sin·dx + cos·dy);
+    la sua inversa (θ -> -θ) mappa (dx,dy) -> (cos·dx - sin·dy, sin·dx + cos·dy),
+    che è esattamente rotate_bbox(+θ) per la convenzione di segno opposta di
+    rotate_bbox. Quindi l'inversione è rotate_bbox con l'angolo NON negato
+    (equivalente a cv2.invertAffineTransform della matrice di deskew).
+
+    Nota: la pipeline ora usa un unico sistema di coordinate (quello
+    dell'immagine deskewed salvata su disco), quindi questa funzione serve
+    solo per mappare verso le coordinate pre-deskew quando servono."""
+    return rotate_bbox(bbox, deskew_angle, img_w, img_h)
 
 
 def iou(a: BBox, b: BBox) -> float:

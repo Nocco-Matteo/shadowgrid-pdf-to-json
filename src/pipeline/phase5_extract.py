@@ -22,10 +22,13 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel
+
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
-from .schema import flatten_extracted, loose
+from .schema import _list_inner_type, flatten_extracted, loose
+from .text_norm import normalize
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +41,53 @@ class Task:
     page_no: int | None
     schema_strict: type  # BaseModel strict per il task
     images_b64: list[str] | None = None
+    item_field: str | None = None   # campo lista (task di un singolo elemento)
+    item_index: int | None = None
+    anchor: str | None = None
+
+
+def _regions_payload(db: DB, doc_id: str, page_no: int) -> list[dict]:
+    # testo canonico (riconciliato): è quello che vedrà anche la validazione
+    return [
+        {"region_id": r["region_id"], "text": r["text"],
+         "type": r["region_type"], "page": page_no}
+        for r in db.get_canonical_regions(doc_id, page_no)
+    ]
+
+
+def _field_page(db: DB, doc_id: str, pages, field_name: str) -> int | None:
+    """Pagina della prima regione che contiene il nome campo (anchor euristica)."""
+    target = normalize(field_name.replace("_", " "))
+    if not target:
+        return None
+    for p in pages:
+        for r in db.get_canonical_regions(doc_id, p["page_no"]):
+            if target in normalize(r["text"] or ""):
+                return p["page_no"]
+    return None
+
+
+def _select_by_ids(regions: list[dict], ids: list[int], margin: int = 1) -> list[dict]:
+    """Regioni con region_id in `ids` + `margin` adiacenti (per posizione)."""
+    if not ids:
+        return regions
+    pos = {r["region_id"]: i for i, r in enumerate(regions)}
+    keep: set[int] = set()
+    for rid in ids:
+        if rid in pos:
+            keep.update(range(max(0, pos[rid] - margin),
+                              min(len(regions), pos[rid] + margin + 1)))
+    return [regions[i] for i in sorted(keep)] or regions
+
+
+def _select_for_fields(regions: list[dict], fields: list[str], margin: int = 1) -> list[dict]:
+    """Unione delle selezioni per-etichetta; fallback: tutte le regioni passate."""
+    keep: set[int] = set()
+    for f in fields:
+        sel = select_regions_for_label(regions, f.replace("_", " "), margin)
+        ids = {r["region_id"] for r in sel}
+        keep.update(i for i, r in enumerate(regions) if r["region_id"] in ids)
+    return [regions[i] for i in sorted(keep)] or regions
 
 
 def build_tasks(
@@ -46,40 +96,46 @@ def build_tasks(
     db: DB,
     settings: Settings,
 ) -> list[Task]:
-    """Raggruppa i campi in task. Per moduli strutturati la posizione è stabile:
-    ancoriamo ogni task a un'etichetta e selezioniamo le regioni della pagina che la
-    contengono + margine sopra/sotto. Implementazione iniziale semplice: un task per
-    pagina con tutti i campi piatti; liste -> un task per elemento (gestito a valle)."""
+    """Contesto ristretto: mai il documento intero quando si può ancorare.
+
+    - Campi piatti: raggruppati per pagina-anchor (nome campo trovato nel testo
+      di una regione), max `max_fields_per_task` per chiamata. Campi non
+      ancorabili -> contesto di tutte le pagine (fallback loggato).
+    - Liste: un task per elemento dell'inventario di Fase 4, ristretto ai
+      region_ids dichiarati + una regione di margine sopra/sotto.
+    """
     tasks: list[Task] = []
     pages = db.get_pages(doc_id)
+    s = settings
 
-    # Campi piatti (non lista) -> un task per documento, regioni di tutte le pagine
     flat_fields = []
     list_fields = []
     for name, fi in schema_strict.model_fields.items():
-        ann = fi.annotation
-        if _is_list_of_model(ann):
+        if _is_list_of_model(fi.annotation):
             list_fields.append(name)
         else:
             flat_fields.append(name)
 
-    if flat_fields:
-        all_regions: list[dict] = []
-        for p in pages:
-            for r in db.get_regions(doc_id, p["page_no"], engine="a"):
-                all_regions.append({
-                    "region_id": r["region_id"],
-                    "text": r["text"],
-                    "type": r["region_type"],
-                    "page": p["page_no"],
-                })
-        tasks.append(Task(
-            name="flat",
-            fields=flat_fields,
-            regions=all_regions,
-            page_no=None,
-            schema_strict=schema_strict,
-        ))
+    # Campi piatti: gruppi per pagina anchor, poi chunk per max_fields_per_task
+    by_page: dict[int | None, list[str]] = {}
+    for f in flat_fields:
+        by_page.setdefault(_field_page(db, doc_id, pages, f), []).append(f)
+
+    for page_no, fields in sorted(by_page.items(), key=lambda kv: (kv[0] is None, kv[0])):
+        if page_no is None:
+            log.warning("Campi non ancorabili a una pagina: %s -> contesto intero", fields)
+            regions = [r for p in pages for r in _regions_payload(db, doc_id, p["page_no"])]
+        else:
+            regions = _select_for_fields(_regions_payload(db, doc_id, page_no), fields)
+        for i in range(0, len(fields), s.max_fields_per_task):
+            chunk = fields[i:i + s.max_fields_per_task]
+            tasks.append(Task(
+                name=f"flat_p{page_no}_{i}",
+                fields=chunk,
+                regions=regions,
+                page_no=page_no,
+                schema_strict=schema_strict,
+            ))
 
     # Liste: un task per elemento (richiede Fase 4 già eseguita)
     for lf in list_fields:
@@ -90,21 +146,17 @@ def build_tasks(
         items = json.loads(inv_row["value_json"] or "[]")
         for i, it in enumerate(items):
             page_no = it.get("page")
-            regions = []
-            if page_no:
-                for r in db.get_regions(doc_id, page_no, engine="a"):
-                    regions.append({
-                        "region_id": r["region_id"],
-                        "text": r["text"],
-                        "type": r["region_type"],
-                        "page": page_no,
-                    })
+            page_regions = _regions_payload(db, doc_id, page_no) if page_no else []
+            regions = _select_by_ids(page_regions, it.get("region_ids") or [])
             tasks.append(Task(
                 name=f"{lf}[{i}]",
                 fields=[lf],
                 regions=regions,
                 page_no=page_no,
                 schema_strict=schema_strict,
+                item_field=lf,
+                item_index=i,
+                anchor=it.get("anchor"),
             ))
 
     return tasks
@@ -118,6 +170,25 @@ def _is_list_of_model(ann: Any) -> bool:
         args = t.get_args(ann)
         return bool(args) and isinstance(args[0], type)
     return False
+
+
+def _task_missing_fields(task: Task, rows: list[dict], schema_strict: type) -> set[str]:
+    """Campi che il task doveva produrre e che NON appaiono nella risposta.
+
+    L'assenza è valida solo se DICHIARATA (foglio con value=null, che produce
+    una riga con value_json=None): un campo semplicemente omesso è lavoro
+    incompleto, non assenza — non deve diventare un Extracted nullo via
+    _fill_missing in Fase 6."""
+    if task.item_field is None:
+        expected = set(task.fields)
+        got = {r["field_path"] for r in rows}
+    else:
+        inner = _list_inner_type(schema_strict.model_fields[task.item_field].annotation)
+        expected = set(inner.model_fields) if inner and issubclass(inner, BaseModel) else set()
+        prefix = f"{task.item_field}[{task.item_index}]."
+        got = {r["field_path"][len(prefix):] for r in rows
+               if r["field_path"].startswith(prefix)}
+    return expected - got
 
 
 def select_regions_for_label(regions: list[dict], label: str, margin: int = 1) -> list[dict]:
@@ -137,6 +208,10 @@ def build_prompt(task: Task) -> str:
     for r in task.regions:
         lines.append(f"[{r['region_id']}] {r['type']}: {r['text']}")
     lines.append("")
+    if task.anchor:
+        lines.append(f"ELEMENTO: {task.anchor}")
+        lines.append("Estrai SOLO i campi di questo elemento della lista.")
+        lines.append("")
     lines.append("CAMPI DA ESTRARRE:")
     for f in task.fields:
         lines.append(f"- {f}")
@@ -160,10 +235,10 @@ def run(
     s = settings or get_settings()
     db = db or DB(s)
     st = db.get_status(doc_id)
-    if st == "extracted":
+    if st in {"extracted", "validated", "done"}:
         log.info("Estrazione già fatta: %s", doc_id)
         return
-    if st not in {"enumerated", "reconciled"}:
+    if st not in {"enumerated", "reconciled", "needs_review"}:
         raise ValueError(f"Estrazione richiede enumerated, trovato {st}")
 
     client = client or ExtractorClient(s.extractor_url, s.extractor_model)
@@ -171,11 +246,43 @@ def run(
     loose_schema = loose(schema_strict)
     guided = loose_schema.model_json_schema()
 
+    failed = False
     for task in tasks:
+        if db.task_status(doc_id, task.name) == "ok":
+            continue  # task già completato (resume)
         prompt = build_prompt(task)
-        raw = client.extract(prompt, images_b64=task.images_b64, guided_json_schema=guided)
-        # raw è un dict con i campi del task; appiattisci e salva tentativi
-        rows = flatten_extracted(raw, prefix="")
+        try:
+            raw = client.extract(prompt, images_b64=task.images_b64,
+                                 guided_json_schema=guided)
+        except Exception as e:
+            # esito del task persistito: un fallimento non è mai "campo assente"
+            db.record_task(doc_id, task.name, "failed", str(e))
+            log.error("Task %s fallito: %s", task.name, e)
+            failed = True
+            continue
+        # Per i task di elemento lista il modello risponde con lo schema intero:
+        # prendiamo il (primo) elemento del campo lista e lo appiattiamo con il
+        # path indicizzato corretto (es. parties[2].name).
+        payload, prefix = raw, ""
+        if task.item_field is not None:
+            item_list = raw.get(task.item_field) or []
+            if len(item_list) > 1:
+                log.warning("Task %s: attesi 1 elemento, ricevuti %d; uso il primo",
+                            task.name, len(item_list))
+            payload = item_list[0] if item_list else {}
+            prefix = f"{task.item_field}[{task.item_index}]."
+        rows = flatten_extracted(payload, prefix=prefix)
+        # Copertura: il task deve rispondere a TUTTI i suoi campi. Una risposta
+        # parziale è un fallimento, non "campo assente": l'assenza è valida
+        # solo se dichiarata (riga con value=null).
+        missing = _task_missing_fields(task, rows, schema_strict)
+        if missing:
+            db.record_task(doc_id, task.name, "failed",
+                           f"campi omessi (assenza non dichiarata): {sorted(missing)}")
+            log.error("Task %s: risposta incompleta, campi omessi: %s",
+                      task.name, sorted(missing))
+            failed = True
+            continue
         for row in rows:
             db.upsert_extraction(
                 doc_id=doc_id,
@@ -188,10 +295,21 @@ def run(
                 status="pending",
                 confidence=row.get("confidence"),
             )
+        db.record_task(doc_id, task.name, "ok")
         log.info("Task %s: %d campi estratti", task.name, len(rows))
 
-    if db.get_status(doc_id) in {"enumerated", "reconciled"}:
-        db.transition(doc_id, "enumerated", "extracted")
+    if failed:
+        # nessun avanzamento implicito: i task falliti restano visibili
+        db.set_status(doc_id, "needs_review")
+        return
+
+    st = db.get_status(doc_id)
+    if st in {"enumerated", "reconciled"}:
+        db.transition(doc_id, st, "extracted")
+    # da needs_review lo stato resta invariato: la chiusura spetta alla Fase 6
+    # (percorso needs_review), che rivalida i pending e applica gli stessi
+    # controlli di completezza della revisione umana. Spingere qui a
+    # 'extracted' bypasserebbe la coda (es. campi rejected non risolti).
 
 
 def _parse_bbox(b: Any) -> tuple[float, float, float, float] | None:
