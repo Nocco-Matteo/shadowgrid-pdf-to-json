@@ -155,3 +155,41 @@ def test_bad_block_bbox_raises():
     blocks = [{"block_label": "text", "block_bbox": [1, 2, 3], "block_content": "x"}]
     with pytest.raises(OCRParseError):
         _parse_paddle_result(_VOResult(_page(blocks)), page_no=1)
+
+
+# ---------------------------------------------------------------------------
+# DeepSeek-OCR 2: output di grounding <|ref|>/<|det|> (non JSON)
+# ---------------------------------------------------------------------------
+
+from pipeline.ocr_clients import _parse_deepseek_grounding  # noqa: E402
+
+DEEPSEEK_OUT = (
+    "<|ref|>title<|/ref|><|det|>[[100, 50, 899, 90]]<|/det|>\n"
+    "# CONTRATTO DI LOCAZIONE\n\n"
+    "<|ref|>text<|/ref|><|det|>[[100, 120, 899, 300]]<|/det|>\n"
+    "Il locatore concede in locazione: {\"canone\": 800}\n\n"
+    "<|ref|>image<|/ref|><|det|>[[100, 400, 500, 600]]<|/det|>\n\n"
+    "<|ref|>table<|/ref|><|det|>[[100, 650, 899, 800]]<|/det|>\n"
+    "<table><tr><td>Canone</td><td>800</td></tr></table>"
+    "<｜end▁of▁sentence｜>"
+)
+
+
+def test_deepseek_grounding_parse():
+    regions = _parse_deepseek_grounding(DEEPSEEK_OUT, page_no=1, img_w=999, img_h=1998)
+    assert [r.region_type for r in regions] == ["text", "text", "table"]  # image scartata
+    assert regions[0].text == "# CONTRATTO DI LOCAZIONE"
+    assert regions[0].bbox == (100, 100, 899, 180)  # scala 0-999 -> pixel
+    assert regions[1].text == 'Il locatore concede in locazione: {"canone": 800}'
+    assert regions[2].text.startswith("<table>") and "end" not in regions[2].text
+    assert [r.order_idx for r in regions] == [0, 1, 2]
+
+
+def test_deepseek_grounding_empty_page():
+    assert _parse_deepseek_grounding("", page_no=1, img_w=100, img_h=100) == []
+
+
+def test_deepseek_grounding_unrecognized_raises():
+    # Testo senza tag (es. skip_special_tokens rimasto attivo): non è una pagina vuota
+    with pytest.raises(OCRParseError):
+        _parse_deepseek_grounding("CONTRATTO DI LOCAZIONE\nIl locatore...", 1, 100, 100)

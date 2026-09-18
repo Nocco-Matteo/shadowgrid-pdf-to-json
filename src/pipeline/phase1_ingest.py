@@ -75,11 +75,14 @@ def estimate_deskew_angle(img_gray: Any) -> float:
         area = cv2.contourArea(c)
         if area < 100:
             continue
-        rect = cv2.minAreaRect(c)
-        angle = rect[-1]
-        # minAreaRect restituisce angoli in [-90, 0); normalizza
-        if angle < -45:
-            angle = 90 + angle
+        (_, _), (w, h), angle = cv2.minAreaRect(c)
+        # La convenzione di minAreaRect cambia tra versioni di OpenCV
+        # ([-90, 0) prima della 4.5.1, (0, 90] dopo): `angle` è sempre
+        # l'orientamento del lato `w`. Si prende quello del lato lungo (la riga
+        # di testo) e lo si riporta in [-45, 45).
+        if w < h:
+            angle += 90
+        angle = (angle + 45) % 90 - 45
         pts.append((angle, area))
     if not pts:
         return _hough_angle(img_gray)

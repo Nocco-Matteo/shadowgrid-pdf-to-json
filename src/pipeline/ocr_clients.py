@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -223,6 +224,56 @@ def _paddle_block_to_region(block: Any, page_no: int, idx: int) -> Region:
 # ---------------------------------------------------------------------------
 
 
+# Prompt di grounding ufficiale: l'output è una sequenza di blocchi
+# `<|ref|>label<|/ref|><|det|>[[x1, y1, x2, y2]]<|/det|>` seguiti dal testo
+# del blocco, con coordinate normalizzate su 0-999. Non è JSON.
+_DEEPSEEK_PROMPT = "<|grounding|>Convert the document to markdown."
+_DEEPSEEK_BLOCK_RE = re.compile(r"<\|ref\|>(.*?)<\|/ref\|><\|det\|>(.*?)<\|/det\|>", re.S)
+_DEEPSEEK_EOS_RE = re.compile(r"<｜end▁of▁sentence｜>|<\|end▁of▁sentence\|>")
+
+# Etichette DeepSeek-OCR non presenti in _LABEL_MAP
+_DEEPSEEK_LABEL_MAP = {
+    "sub_title": "text",
+    "table_caption": "text",
+    "table_footnote": "text",
+    "image_caption": "text",
+    "equation": "formula",
+}
+
+
+def _parse_deepseek_grounding(content: str, page_no: int, img_w: int, img_h: int) -> list[Region]:
+    """Converte l'output di grounding di DeepSeek-OCR 2 in Region (bbox in pixel)."""
+    content = _DEEPSEEK_EOS_RE.sub("", content or "")
+    matches = list(_DEEPSEEK_BLOCK_RE.finditer(content))
+    if not matches:
+        if content.strip():
+            raise OCRParseError(f"output DeepSeek-OCR senza blocchi <|ref|>/<|det|>: {content[:200]!r}")
+        return []
+    regions: list[Region] = []
+    for i, m in enumerate(matches):
+        label = m.group(1).strip().lower()
+        if label == "image":
+            continue  # figura: nessun testo da riconciliare
+        try:
+            boxes = json.loads(m.group(2))
+        except json.JSONDecodeError as e:
+            raise OCRParseError(f"coordinate DeepSeek-OCR non valide: {m.group(2)!r}") from e
+        if not (isinstance(boxes, list) and boxes and isinstance(boxes[0], list) and len(boxes[0]) == 4):
+            raise OCRParseError(f"coordinate DeepSeek-OCR inattese: {m.group(2)!r}")
+        # Più box per lo stesso blocco: si usa quella che li contiene tutti
+        x1 = min(b[0] for b in boxes)
+        y1 = min(b[1] for b in boxes)
+        x2 = max(b[2] for b in boxes)
+        y2 = max(b[3] for b in boxes)
+        bbox = (x1 / 999 * img_w, y1 / 999 * img_h, x2 / 999 * img_w, y2 / 999 * img_h)
+        text_end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        text = content[m.end():text_end].strip()
+        rtype = _DEEPSEEK_LABEL_MAP.get(label) or _map_label(label)
+        regions.append(Region(page_no=page_no, bbox=bbox, region_type=rtype,
+                              text=text, order_idx=len(regions)))
+    return regions
+
+
 class DeepSeekOCRClient:
     def __init__(self, url: str | None = None, model: str | None = None):
         s = get_settings()
@@ -230,32 +281,30 @@ class DeepSeekOCRClient:
         self.model = model or s.model_b
 
     def ocr_page(self, image_path: str | Path, page_no: int) -> list[Region]:
-        # DeepSeek-OCR2 expone un'API simile a OpenAI vision via vLLM.
-        # Qui usiamo il client OpenAI generico; l'implementazione concreta può variare.
+        import base64
+
         from openai import OpenAI  # import lazy
+        from PIL import Image
 
         client = OpenAI(base_url=self.url, api_key="EMPTY")
         with open(image_path, "rb") as f:
-            import base64
-
             b64 = base64.b64encode(f.read()).decode()
+        with Image.open(image_path) as im:
+            img_w, img_h = im.size
         resp = client.chat.completions.create(
             model=self.model,
             messages=[{
                 "role": "user",
                 "content": [
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                    {"type": "text", "text": "Extract text regions with bbox and type as JSON."},
+                    {"type": "text", "text": _DEEPSEEK_PROMPT},
                 ],
             }],
             temperature=0.0,
+            # Senza questo vLLM toglie i token <|ref|>/<|det|> dall'output
+            extra_body={"skip_special_tokens": False},
         )
-        items = json.loads(resp.choices[0].message.content or "[]")
-        return [
-            Region(page_no=page_no, bbox=tuple(it.get("bbox")) if it.get("bbox") else None,
-                   region_type=it.get("type", "text"), text=it.get("text", ""), order_idx=i)
-            for i, it in enumerate(items)
-        ]
+        return _parse_deepseek_grounding(resp.choices[0].message.content or "", page_no, img_w, img_h)
 
 
 # ---------------------------------------------------------------------------
