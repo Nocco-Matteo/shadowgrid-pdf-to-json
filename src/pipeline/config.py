@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     extractor_max_model_len: int = 16384
     extractor_max_num_batched_tokens: int = 4096
     extractor_gpu_memory_utilization: float = 0.92
+    # Il 27B è multimodale ma riceve solo testo: senza encoder visivo vLLM
+    # risparmia ~0.8GB di pesi e il profiling delle immagini. Da disattivare
+    # se un giorno l'estrattore riceve images_b64.
+    extractor_text_only: bool = True
+    extractor_max_num_seqs: int = 8
     extractor_vllm_args: list[str] = Field(default_factory=list)
 
     # Rasterizzazione
