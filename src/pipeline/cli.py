@@ -89,7 +89,7 @@ def cmd_enumerate(args) -> None:
     s = get_settings()
     db = DB(s)
     runner = VLLMRunner(s)
-    url = runner.start(s.extractor_model, port=8080, phase="enumerate")
+    url = runner.start_extractor(port=8080, phase="enumerate")
     s.extractor_url = url
     try:
         for doc_id in _resolve_doc_ids(args, db):
@@ -103,7 +103,7 @@ def cmd_extract(args) -> None:
     s = get_settings()
     db = DB(s)
     runner = VLLMRunner(s)
-    url = runner.start(s.extractor_model, port=8080, phase="extract")
+    url = runner.start_extractor(port=8080, phase="extract")
     s.extractor_url = url
     try:
         for doc_id in _resolve_doc_ids(args, db):
@@ -119,7 +119,7 @@ def cmd_validate(args) -> None:
     # vivo durante la validazione (altrimenti ogni retry è destinato a fallire
     # e ricade sul valore precedente fino a esaurire i tentativi).
     runner = VLLMRunner(s)
-    s.extractor_url = runner.start(s.extractor_model, port=8080, phase="extract")
+    s.extractor_url = runner.start_extractor(port=8080, phase="extract")
     try:
         for doc_id in _resolve_doc_ids(args, db):
             phase6_validate.run(doc_id, DEFAULT_SCHEMA, db=db, settings=s)
@@ -182,7 +182,7 @@ def cmd_run(args) -> None:
     # Enumerate + Extract + Validate (stesso modello: un solo avvio del server).
     # La validazione avviene con il server ancora attivo: i retry di Fase 6
     # rilanciano l'estrattore via HTTP.
-    s.extractor_url = runner.start(s.extractor_model, port=8080, phase="extract")
+    s.extractor_url = runner.start_extractor(port=8080, phase="extract")
     try:
         for p in args.paths:
             doc_id = phase1_ingest.ingest(Path(p), db=db)

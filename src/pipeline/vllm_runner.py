@@ -52,6 +52,7 @@ class VLLMRunner:
         port: int = 8080,
         extra_args: list[str] | None = None,
         phase: str = "phase",
+        max_num_batched_tokens: int = 16384,
     ) -> str:
         """Avvia `vllm serve <model>` e aspetta health-check su /v1/models."""
         if self.proc is not None and self.proc.poll() is None:
@@ -62,7 +63,7 @@ class VLLMRunner:
             "vllm", "serve", model,
             "--port", str(port),
             "--trust-remote-code",
-            "--max-num-batched-tokens", "16384",
+            "--max-num-batched-tokens", str(max_num_batched_tokens),
             "--no-enable-prefix-caching",
             "--mm-processor-cache-gb", "0",
         ]
@@ -79,6 +80,21 @@ class VLLMRunner:
         url = f"http://127.0.0.1:{port}/v1"
         self._wait_ready(url, timeout=900)
         return url
+
+    def start_extractor(self, port: int = 8080, phase: str = "extract") -> str:
+        """Avvia l'estrattore con i limiti di memoria da config."""
+        s = self.s
+        return self.start(
+            s.extractor_model,
+            port=port,
+            phase=phase,
+            max_num_batched_tokens=s.extractor_max_num_batched_tokens,
+            extra_args=[
+                "--max-model-len", str(s.extractor_max_model_len),
+                "--gpu-memory-utilization", str(s.extractor_gpu_memory_utilization),
+                *s.extractor_vllm_args,
+            ],
+        )
 
     def _wait_ready(self, url: str, timeout: int = 900) -> None:
         deadline = time.time() + timeout

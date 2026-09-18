@@ -167,7 +167,7 @@ def main() -> int:
         banner(f"Fasi 4-6 — enumerate + extract + validate ({s.extractor_model})")
         # La validazione avviene con il server ancora attivo: i retry di
         # Fase 6 rilanciano l'estrattore via HTTP (come in cli.cmd_run).
-        s.extractor_url = runner.start(s.extractor_model, port=8080, phase="extract")
+        s.extractor_url = runner.start_extractor(port=8080, phase="extract")
         try:
             for lf in args.list_fields or []:
                 phase4_enumerate.run(doc_id, lf, db=db, settings=s)

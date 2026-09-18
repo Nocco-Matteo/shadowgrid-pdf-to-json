@@ -33,6 +33,12 @@ extractor_url: "http://127.0.0.1:8080/v1"
 # conflict_upscale: 2
 # conflict_rate_warn: 0.05
 
+# --- Server vLLM dell'estrattore (limiti VRAM, RTX 4090 24GB in WSL) ---
+# extractor_max_model_len: 16384          # contesto massimo (prompt + risposta)
+# extractor_max_num_batched_tokens: 4096  # picco attivazioni in prefill
+# extractor_gpu_memory_utilization: 0.92  # > ~0.93 in WSL: vLLM non parte
+# extractor_vllm_args: ["--enforce-eager"]  # argomenti extra per `vllm serve`
+
 # --- Estrazione ---
 # extractor_temperature: 0.0
 # extractor_seed: 12345

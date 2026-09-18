@@ -88,6 +88,8 @@ if ($SkipSmoke) {
         Write-Host "  Smoke test OK" -ForegroundColor Green
     } else {
         Write-Host "  Smoke test FALLITO - vedi sopra e runs/vllm_*.log" -ForegroundColor Red
+        Write-Host "  Il setup e' installato ma la pipeline NON funziona: correggi e rilancia lo smoke." -ForegroundColor Red
+        exit 1
     }
 }
 

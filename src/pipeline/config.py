@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     model_b: str = "deepseek-ai/DeepSeek-OCR-2"
     extractor_model: str = "nicosuter/Qwen3.8-27B-AWQ"
 
+    # Server vLLM dell'estrattore (27B su 24GB: i default di vLLM non lasciano
+    # memoria per la KV cache). gpu_memory_utilization è una frazione della VRAM
+    # totale: in WSL Windows ne tiene ~1.5GB, oltre ~0.93 vLLM non parte.
+    extractor_max_model_len: int = 16384
+    extractor_max_num_batched_tokens: int = 4096
+    extractor_gpu_memory_utilization: float = 0.92
+    extractor_vllm_args: list[str] = Field(default_factory=list)
+
     # Rasterizzazione
     dpi: int = 300
     dpi_degraded: int = 400
