@@ -127,6 +127,21 @@ def loose(model: type[BaseModel]) -> type[BaseModel]:
     return type(f"{model.__name__}Loose", (BaseModel,), namespace)
 
 
+_CONSTRAINT_KEYS = {
+    "pattern", "format", "minimum", "maximum", "exclusiveMinimum",
+    "exclusiveMaximum", "multipleOf", "minLength", "maxLength",
+}
+
+
+def _strip_constraints(node: Any) -> Any:
+    """Rimuove dai JSON schema i vincoli di valore (verificati a valle dallo strict)."""
+    if isinstance(node, dict):
+        return {k: _strip_constraints(v) for k, v in node.items() if k not in _CONSTRAINT_KEYS}
+    if isinstance(node, list):
+        return [_strip_constraints(v) for v in node]
+    return node
+
+
 def guided_schema(
     model: type[BaseModel],
     fields: list[str] | None = None,
@@ -134,15 +149,18 @@ def guided_schema(
 ) -> dict[str, Any]:
     """JSON schema per la generazione vincolata di un task di estrazione.
 
-    Parte da ``loose(model)`` ma, a differenza di quello (dove tutto è
-    opzionale), obbliga il modello a rispondere a ogni campo richiesto:
+    Parte dallo schema strict senza i vincoli pesanti per la grammatica
+    (pattern, min/max, lunghezze): restano i tipi dei valori (number, enum...),
+    altrimenti il modello restituisce p.es. un importo come stringa "1.234,50"
+    e la validazione strict finale fallisce. Rispetto a ``loose`` obbliga il
+    modello a rispondere a ogni campo richiesto:
     - la radice contiene solo ``fields`` (default: tutti), tutti required;
     - ogni campo foglia è l'oggetto Extracted (non null) con value e quote
       required: l'assenza si dichiara con value=null e quote=null, non
       omettendo la chiave (che in Fase 5 è un task fallito);
     - ``single_item``: le liste hanno esattamente un elemento (task per
       singolo elemento di lista)."""
-    schema = loose(model).model_json_schema()
+    schema = _strip_constraints(model.model_json_schema())
     defs = schema.get("$defs", {})
 
     def tighten(obj: dict[str, Any]) -> None:

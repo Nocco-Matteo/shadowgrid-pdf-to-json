@@ -87,10 +87,23 @@ def test_guided_schema_flat_task_requires_only_its_fields():
     assert set(g["properties"]) == {"contract_number", "currency"}
     assert set(g["required"]) == {"contract_number", "currency"}
     # il campo foglia è l'oggetto Extracted, non null
-    assert g["properties"]["contract_number"] == {"$ref": "#/$defs/Extracted_Any_"}
-    leaf = g["$defs"]["Extracted_Any_"]
+    assert g["properties"]["contract_number"] == {"$ref": "#/$defs/Extracted_str_"}
+    leaf = g["$defs"]["Extracted_str_"]
     assert leaf["required"] == ["value", "quote"]
     assert all("default" not in p for p in leaf["properties"].values())
+
+
+def test_guided_schema_keeps_value_types():
+    """Regressione smoke: con Extracted[Any] il modello dava amount_eur come
+    stringa "1.234,50" e lo schema strict finale falliva."""
+    from pipeline.schema import guided_schema
+
+    g = guided_schema(ContractStrict, ["amount_eur", "currency"])
+    types = lambda ref: g["$defs"][ref.split("/")[-1]]["properties"]["value"]  # noqa: E731
+    amount = types(g["properties"]["amount_eur"]["$ref"])
+    assert {"type": "number"} in amount["anyOf"]
+    currency = types(g["properties"]["currency"]["$ref"])
+    assert any(o.get("enum") == ["EUR", "USD", "GBP"] for o in currency["anyOf"])
 
 
 def test_guided_schema_list_item_task():
@@ -100,9 +113,9 @@ def test_guided_schema_list_item_task():
     assert g["required"] == ["parties"]
     parties = g["properties"]["parties"]
     assert parties["type"] == "array" and parties["minItems"] == parties["maxItems"] == 1
-    party = g["$defs"]["PartyLoose"]
+    party = g["$defs"]["Party"]
     assert set(party["required"]) == {"name", "role", "vat_id"}
-    assert party["properties"]["vat_id"] == {"$ref": "#/$defs/Extracted_Any_"}
+    assert party["properties"]["vat_id"] == {"$ref": "#/$defs/Extracted_Union_str__NoneType__"}
 
 
 def test_guided_schema_accepts_declared_absence_and_rejects_omission():
