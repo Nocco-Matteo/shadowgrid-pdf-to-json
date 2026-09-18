@@ -73,3 +73,54 @@ def test_flatten_omitted_field_no_row():
     # campo mai presente nel payload -> nessuna riga (vs null esplicito)
     rows = flatten_extracted({"name": {"value": "ACME", "quote": "ACME"}})
     assert [r["field_path"] for r in rows] == ["name"]
+
+
+# ---------------------------------------------------------------------------
+# guided_schema: schema per task con tutti i campi obbligatori
+# ---------------------------------------------------------------------------
+
+
+def test_guided_schema_flat_task_requires_only_its_fields():
+    from pipeline.schema import guided_schema
+
+    g = guided_schema(ContractStrict, ["contract_number", "currency"])
+    assert set(g["properties"]) == {"contract_number", "currency"}
+    assert set(g["required"]) == {"contract_number", "currency"}
+    # il campo foglia è l'oggetto Extracted, non null
+    assert g["properties"]["contract_number"] == {"$ref": "#/$defs/Extracted_Any_"}
+    leaf = g["$defs"]["Extracted_Any_"]
+    assert leaf["required"] == ["value", "quote"]
+    assert all("default" not in p for p in leaf["properties"].values())
+
+
+def test_guided_schema_list_item_task():
+    from pipeline.schema import guided_schema
+
+    g = guided_schema(ContractStrict, ["parties"], single_item=True)
+    assert g["required"] == ["parties"]
+    parties = g["properties"]["parties"]
+    assert parties["type"] == "array" and parties["minItems"] == parties["maxItems"] == 1
+    party = g["$defs"]["PartyLoose"]
+    assert set(party["required"]) == {"name", "role", "vat_id"}
+    assert party["properties"]["vat_id"] == {"$ref": "#/$defs/Extracted_Any_"}
+
+
+def test_guided_schema_accepts_declared_absence_and_rejects_omission():
+    jsonschema = pytest.importorskip("jsonschema")
+    from pipeline.schema import guided_schema
+
+    g = guided_schema(ContractStrict, ["parties"], single_item=True)
+    leaf = {"value": "x", "quote": "x", "page": 1, "bbox": None, "confidence": "high"}
+    absent = {"value": None, "quote": None}
+    jsonschema.validate({"parties": [{"name": leaf, "role": leaf, "vat_id": absent}]}, g)
+    with pytest.raises(jsonschema.ValidationError):  # vat_id omesso
+        jsonschema.validate({"parties": [{"name": leaf, "role": leaf}]}, g)
+    with pytest.raises(jsonschema.ValidationError):  # campo intero a null
+        jsonschema.validate({"parties": [{"name": None, "role": leaf, "vat_id": absent}]}, g)
+
+
+def test_loose_unchanged_by_guided_schema():
+    from pipeline.schema import guided_schema
+
+    guided_schema(ContractStrict, ["parties"], single_item=True)
+    assert loose(ContractStrict)().model_dump() == {k: None for k in ContractStrict.model_fields}

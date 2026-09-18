@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
-from .schema import _list_inner_type, flatten_extracted, loose
+from .schema import _list_inner_type, flatten_extracted, guided_schema
 from .text_norm import normalize
 
 log = logging.getLogger(__name__)
@@ -243,14 +243,16 @@ def run(
 
     client = client or ExtractorClient(s.extractor_url, s.extractor_model)
     tasks = build_tasks(doc_id, schema_strict, db, s)
-    loose_schema = loose(schema_strict)
-    guided = loose_schema.model_json_schema()
 
     failed = False
     for task in tasks:
         if db.task_status(doc_id, task.name) == "ok":
             continue  # task già completato (resume)
         prompt = build_prompt(task)
+        # Schema dei soli campi del task, tutti obbligatori: il modello non
+        # può omettere una chiave, solo dichiararne l'assenza (value=null).
+        guided = guided_schema(schema_strict, task.fields,
+                               single_item=task.item_field is not None)
         try:
             raw = client.extract(prompt, images_b64=task.images_b64,
                                  guided_json_schema=guided)

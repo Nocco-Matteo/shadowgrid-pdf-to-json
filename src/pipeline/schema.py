@@ -127,6 +127,49 @@ def loose(model: type[BaseModel]) -> type[BaseModel]:
     return type(f"{model.__name__}Loose", (BaseModel,), namespace)
 
 
+def guided_schema(
+    model: type[BaseModel],
+    fields: list[str] | None = None,
+    single_item: bool = False,
+) -> dict[str, Any]:
+    """JSON schema per la generazione vincolata di un task di estrazione.
+
+    Parte da ``loose(model)`` ma, a differenza di quello (dove tutto è
+    opzionale), obbliga il modello a rispondere a ogni campo richiesto:
+    - la radice contiene solo ``fields`` (default: tutti), tutti required;
+    - ogni campo foglia è l'oggetto Extracted (non null) con value e quote
+      required: l'assenza si dichiara con value=null e quote=null, non
+      omettendo la chiave (che in Fase 5 è un task fallito);
+    - ``single_item``: le liste hanno esattamente un elemento (task per
+      singolo elemento di lista)."""
+    schema = loose(model).model_json_schema()
+    defs = schema.get("$defs", {})
+
+    def tighten(obj: dict[str, Any]) -> None:
+        props = obj.get("properties", {})
+        for prop in props.values():
+            prop.pop("default", None)
+            options = [o for o in prop.get("anyOf", []) if o.get("type") != "null"]
+            if len(options) == 1 and ("$ref" in options[0] or options[0].get("type") == "array"):
+                prop.pop("anyOf")
+                prop.update(options[0])
+            if single_item and prop.get("type") == "array":
+                prop["minItems"] = prop["maxItems"] = 1
+        obj["required"] = list(props)
+
+    for d in defs.values():
+        if str(d.get("title", "")).startswith("Extracted"):
+            for prop in d.get("properties", {}).values():
+                prop.pop("default", None)
+            d["required"] = ["value", "quote"]
+        else:
+            tighten(d)
+    if fields is not None:
+        schema["properties"] = {k: v for k, v in schema["properties"].items() if k in fields}
+    tighten(schema)
+    return schema
+
+
 # ---------------------------------------------------------------------------
 # Flatten per scrittura su tabella extractions
 # ---------------------------------------------------------------------------
