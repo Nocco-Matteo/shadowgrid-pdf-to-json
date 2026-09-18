@@ -11,6 +11,13 @@ model_a: "PaddlePaddle/PaddleOCR-VL-1.6"     # OCR primario, ~3GB VRAM
 model_b: "deepseek-ai/DeepSeek-OCR-2"        # OCR secondario, ~4GB VRAM
 extractor_model: "nicosuter/Qwen3.8-27B-AWQ" # estrattore, ~18GB VRAM + KV
 
+# --- Schema di estrazione ---
+# race_traits -> seeds/raceTraits.json del compendium (schema/compendium.schema.json)
+# contract    -> contratto di esempio (usato dallo smoke test)
+schema_name: "race_traits"
+# Codici del libro per l'export (anche con --source); es. ["players_handbook"]
+# source_codes: []
+
 # --- Endpoint server vLLM (uno alla volta, fasi in serie) ---
 vllm_url: "http://127.0.0.1:8080/v1"
 ocr_a_url: "http://127.0.0.1:8080/v1"
@@ -43,6 +50,8 @@ extractor_url: "http://127.0.0.1:8080/v1"
 # extractor_vllm_args: ["--enforce-eager"]  # argomenti extra per `vllm serve`
 
 # --- Estrazione ---
+# extractor_max_tokens: 2048       # token massimi di risposta
+# enumerate_window_tokens: null    # Fase 4: token per finestra (null = automatico dal contesto)
 # extractor_temperature: 0.0
 # extractor_seed: 12345
 # max_fields_per_task: 8

@@ -142,6 +142,19 @@ def _normalize_number(s: str) -> float | None:
         return None
 
 
+def _numbers_in(value: Any) -> list[float]:
+    """Valori numerici (non booleani) di una struttura annidata; le chiavi no."""
+    if isinstance(value, bool):
+        return []
+    if isinstance(value, (int, float)):
+        return [float(value)]
+    if isinstance(value, dict):
+        return [n for v in value.values() for n in _numbers_in(v)]
+    if isinstance(value, list):
+        return [n for v in value for n in _numbers_in(v)]
+    return []
+
+
 def gate_value_quote(value: Any, quote: str) -> bool:
     """Il valore deve essere derivabile dalla citazione. Controlli CONSERVATIVI:
 
@@ -158,6 +171,13 @@ def gate_value_quote(value: Any, quote: str) -> bool:
         return True
     if value is None or quote is None:
         return False
+    # valori strutturati (es. effects del compendium): sono un'interpretazione
+    # della regola, non una sua copia. Controllo conservativo sui soli numeri:
+    # ognuno deve comparire nella citazione (un "35 feet" -> speed_bonus 5 è
+    # derivato e finisce in revisione umana, non passa in silenzio).
+    if isinstance(value, (list, dict)):
+        q_nums = _signed_numbers(quote)
+        return all(any(abs(nv - n) < 1e-6 for nv in q_nums) for n in _numbers_in(value))
     # numeri / date
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:
@@ -477,6 +497,26 @@ def _get_path(doc: Any, path: str) -> Any:
     return cur
 
 
+def _retry_pages(doc_id: str, field_path: str, row, db: DB, max_pages: int = 3) -> list[int]:
+    """Pagine da rileggere nel retry: quella della riga; per un elemento di
+    lista quelle dell'inventario (elemento + sezione); per documenti corti
+    tutte. Vuota se non c'è modo di restringere il contesto."""
+    pages: list[int] = [row["page_no"]] if row["page_no"] else []
+    top = _SEG.match(field_path)
+    if top and top.group(2) is not None:
+        inv = db.latest_extraction(doc_id, f"{top.group(1)}$inventory")
+        items = json.loads(inv["value_json"] or "[]") if inv else []
+        idx = int(top.group(2))
+        if idx < len(items):
+            for pn in (items[idx].get("section_page"), items[idx].get("page")):
+                if pn and pn not in pages:
+                    pages.append(pn)
+    if pages:
+        return sorted(pages)
+    all_pages = [p["page_no"] for p in db.get_pages(doc_id)]
+    return all_pages if len(all_pages) <= max_pages else []
+
+
 def _retry_extract(
     doc_id: str,
     field_path: str,
@@ -490,17 +530,24 @@ def _retry_extract(
     """Rilancia l'estrattore sul singolo campo con l'errore accodato al prompt.
     Ritorna il nuovo leaf {value_json, quote, page_no, bbox, confidence};
     in caso di risposta inutilizzabile, ricade sui valori precedenti."""
-    page_nos = [row["page_no"]] if row["page_no"] else [p["page_no"] for p in db.get_pages(doc_id)]
+    page_nos = _retry_pages(doc_id, field_path, row, db)
+    if not page_nos:
+        # senza pagina il contesto sarebbe l'intero documento: su un manuale
+        # sfora il contesto dell'estrattore. Meglio la revisione umana.
+        log.warning("Retry %s: nessuna pagina nota, niente contesto da rileggere", field_path)
+        return {"value_json": row["value_json"], "quote": row["quote"],
+                "page_no": row["page_no"], "bbox": _bbox(row),
+                "confidence": row["confidence"]}
     regions = [
-        {"region_id": r["region_id"], "type": r["region_type"], "text": r["text"]}
+        {"region_id": r["region_id"], "type": r["region_type"], "text": r["text"], "page": pn}
         for pn in page_nos for r in db.get_canonical_regions(doc_id, pn)
     ]
     # Schema del solo campo in retry. Per un elemento di lista (parties[1].name)
     # il modello risponde con una lista di UN elemento: l'indice va riletto a 0.
     top = _SEG.match(field_path)
     top_field, item_idx = top.group(1), top.group(2)
-    lines = ["REGIONI (id | tipo | testo):"]
-    lines += [f"[{r['region_id']}] {r['type']}: {r['text']}" for r in regions]
+    lines = ["REGIONI (id | pagina | tipo | testo):"]
+    lines += [f"[{r['region_id']}] p.{r['page']} {r['type']}: {r['text']}" for r in regions]
     lines += [
         "",
         f"CAMPO DA ESTRARRE: {field_path}",

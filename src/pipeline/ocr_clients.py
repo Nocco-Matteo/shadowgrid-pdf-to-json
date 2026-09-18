@@ -374,7 +374,7 @@ class ExtractorClient:
             "messages": [{"role": "user", "content": content}],
             "temperature": self.temperature,
             "seed": self.seed,
-            "max_tokens": 2048,
+            "max_tokens": get_settings().extractor_max_tokens,
             # Qwen3.x ragiona (<think>) prima di rispondere: qui serve solo il JSON
             "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
         }
@@ -388,7 +388,12 @@ class ExtractorClient:
             }
 
         resp = client.chat.completions.create(**kwargs)
-        text = (resp.choices[0].message.content or "").strip()
+        choice = resp.choices[0]
+        text = (choice.message.content or "").strip()
+        if getattr(choice, "finish_reason", None) == "length":
+            raise ExtractorError(
+                f"risposta troncata a max_tokens={kwargs['max_tokens']} "
+                f"(alza extractor_max_tokens): {text[-120:]!r}")
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError as e:

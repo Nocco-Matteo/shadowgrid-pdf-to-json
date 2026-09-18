@@ -26,9 +26,16 @@ pytest -q                            # test (con stub per dipendenze pesanti)
 ruff check src tests
 
 python -m pipeline.cli ingest path/to/doc.pdf
-python -m pipeline.cli run path/to/doc.pdf   # end-to-end
+python -m pipeline.cli run path/to/doc.pdf --source players_handbook   # end-to-end + export
+python -m pipeline.cli export --doc-id <doc_id> --source players_handbook
 python -m pipeline.cli eval                    # valutazione sul gold set
 ```
+
+Lo schema di default è `race_traits`: estrae i tratti razziali che cambiano un
+numero e scrive `runs/export/<doc_id>/raceTraits.json` nel formato di
+`seeds/raceTraits.json`, validato contro `schema/compendium.schema.json` (solo
+gli elementi validati; esclusi e motivi in `raceTraits.json.notes.txt`).
+`--schema contract` usa il contratto di esempio dello smoke test.
 
 ## Documenti
 

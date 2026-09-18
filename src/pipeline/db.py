@@ -198,6 +198,18 @@ class DB:
         with self.tx() as cur:
             cur.execute("UPDATE documents SET status=? WHERE doc_id=?", (dst, doc_id))
 
+    def reset_extraction(self, doc_id: str) -> None:
+        """Cancella inventari, estrazioni ed esiti dei task e riporta il
+        documento a `reconciled`: si riestrae (es. con un altro schema) senza
+        rifare rasterizzazione e OCR."""
+        st = self.get_status(doc_id)
+        if st not in {"reconciled", "enumerated", "extracted", "validated", "done", "needs_review"}:
+            raise ValueError(f"Reset estrazione: {doc_id} in stato {st}, OCR non completato")
+        with self.tx() as cur:
+            cur.execute("DELETE FROM extractions WHERE doc_id=?", (doc_id,))
+            cur.execute("DELETE FROM tasks WHERE doc_id=?", (doc_id,))
+            cur.execute("UPDATE documents SET status='reconciled' WHERE doc_id=?", (doc_id,))
+
     def get_pending(self, status: str) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM documents WHERE status=?", (status,)

@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     model_b: str = "deepseek-ai/DeepSeek-OCR-2"
     extractor_model: str = "nicosuter/Qwen3.8-27B-AWQ"
 
+    # Schema di estrazione (chiave di schema.SCHEMAS) e codici del libro per
+    # l'export verso i seed del compendium (sovrascrivibili con --schema/--source)
+    schema_name: str = "race_traits"
+    source_codes: list[str] = Field(default_factory=list)
+
     # Server vLLM dell'estrattore (27B su 24GB: i default di vLLM non lasciano
     # memoria per la KV cache). gpu_memory_utilization è una frazione della VRAM
     # totale: in WSL Windows ne tiene ~1.5GB (22.45/23.99 GiB liberi), oltre
@@ -92,6 +97,11 @@ class Settings(BaseSettings):
     extractor_temperature: float = 0.0
     extractor_seed: int = 12345
     max_fields_per_task: int = 8
+    # Token massimi di risposta dell'estrattore
+    extractor_max_tokens: int = 2048
+    # Fase 4: token di regioni per chiamata. None = automatico dal contesto
+    # (extractor_max_model_len - extractor_max_tokens - 1024 per le istruzioni)
+    enumerate_window_tokens: int | None = None
 
     # Validazione
     grounding_threshold: int = 90

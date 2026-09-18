@@ -1,0 +1,218 @@
+"""Ponte verso ``schema/compendium.schema.json`` (i seed curati di Shadow Grid).
+
+La pipeline estrae con modelli Pydantic ``Extracted[T]`` (valore + citazione);
+il compendium è un JSON Schema Draft 2020-12 con un envelope per file seed.
+Questo modulo:
+
+- estrae un sotto-schema del compendium (es. ``featureEffect``) in forma adatta
+  alla generazione vincolata: solo le $defs raggiunte, riferimenti annidati
+  appiattiti, ``oneOf`` -> ``anyOf``, niente vincoli di valore/default;
+- valida valori ed envelope con ``jsonschema`` contro lo schema vero;
+- converte le estrazioni validate nel formato del seed (``{version, definitions}``).
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import re
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schema" / "compendium.schema.json"
+
+# Vincoli di valore: verificati a valle da jsonschema, non servono al decoder
+# (e pattern/lunghezze rendono la grammatica lenta da compilare).
+_DROP_KEYS = {
+    "pattern", "format", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+    "multipleOf", "minLength", "maxLength", "default", "description", "$comment",
+}
+
+
+@lru_cache(maxsize=4)
+def load_schema(path: str | Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
+    return _merge_closed_allof(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def _merge_closed_allof(root: dict[str, Any]) -> dict[str, Any]:
+    """Il compendium esprime `base.extend({...})` di Zod come ``allOf`` di due
+    oggetti entrambi con ``additionalProperties: false``: in JSON Schema ogni
+    ramo valida da solo, quindi ciascuno rifiuta i campi dell'altro e NESSUN
+    oggetto è valido (nemmeno i seed). Qui i rami vengono fusi in un unico
+    oggetto chiuso, che è la semantica voluta. Da correggere nel generatore
+    dello schema (unire i rami o usare unevaluatedProperties)."""
+    for def_name, d in root.get("$defs", {}).items():
+        branches = d.get("allOf") if isinstance(d, dict) else None
+        if not branches:
+            continue
+        resolved = [_resolve(root, b["$ref"]) if "$ref" in b else b for b in branches]
+        if not all(b.get("type") == "object" and b.get("additionalProperties") is False
+                   for b in resolved):
+            continue
+        merged: dict[str, Any] = {"type": "object", "additionalProperties": False,
+                                  "properties": {}, "required": []}
+        for b in resolved:
+            merged["properties"].update(b.get("properties", {}))
+            merged["required"] += [r for r in b.get("required", []) if r not in merged["required"]]
+        root["$defs"][def_name] = {**{k: v for k, v in d.items() if k != "allOf"}, **merged}
+    return root
+
+
+def _resolve(root: dict[str, Any], ref: str) -> Any:
+    if not ref.startswith("#/"):
+        raise ValueError(f"$ref non locale non supportato: {ref}")
+    node: Any = root
+    for part in ref[2:].split("/"):
+        node = node[part.replace("~1", "/").replace("~0", "~")]
+    return node
+
+
+def _flat_name(ref: str) -> str:
+    # "#/$defs/effects/resistance" -> "effects__resistance"
+    return ref.removeprefix("#/$defs/").replace("/", "__")
+
+
+def decoding_schema(def_name: str, path: str | Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
+    """Sotto-schema autosufficiente di ``$defs/<def_name>`` per il decoder."""
+    root = load_schema(path)
+    defs: dict[str, Any] = {}
+
+    def convert(node: Any) -> Any:
+        if isinstance(node, list):
+            return [convert(v) for v in node]
+        if not isinstance(node, dict):
+            return node
+        out: dict[str, Any] = {}
+        for k, v in node.items():
+            if k in _DROP_KEYS:
+                continue
+            if k == "$ref":
+                name = _flat_name(v)
+                if name not in defs:
+                    defs[name] = {}  # segnaposto contro i cicli
+                    defs[name] = convert(_resolve(root, v))
+                out["$ref"] = f"#/$defs/{name}"
+            elif k == "oneOf":
+                out["anyOf"] = convert(v)  # varianti con `kind` const: disgiunte comunque
+            else:
+                out[k] = convert(v)
+        return out
+
+    top = convert({"$ref": f"#/$defs/{def_name}"})
+    return {"$defs": defs, **top}
+
+
+def _errors(schema: dict[str, Any], value: Any) -> list[str]:
+    from jsonschema import Draft202012Validator
+
+    return [f"{'/'.join(map(str, e.absolute_path)) or '<root>'}: {e.message}"
+            for e in Draft202012Validator(schema).iter_errors(value)]
+
+
+def validate_def(value: Any, def_name: str, path: str | Path = DEFAULT_SCHEMA_PATH) -> list[str]:
+    """Errori di validazione di ``value`` contro ``$defs/<def_name>`` (vuota = ok)."""
+    root = load_schema(path)
+    return _errors({"$schema": root.get("$schema"), "$defs": root["$defs"],
+                    "$ref": f"#/$defs/{def_name}"}, value)
+
+
+def envelope_schema(seed_file: str, path: str | Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
+    """Schema dell'envelope di un file seed (es. "raceTraits.json")."""
+    root = load_schema(path)
+    for env in root["oneOf"]:
+        if env.get("title") == seed_file:
+            return {"$schema": root.get("$schema"), "$defs": root["$defs"], **env}
+    raise KeyError(f"envelope {seed_file!r} non presente nel compendium")
+
+
+def validate_envelope(doc: dict[str, Any], seed_file: str,
+                      path: str | Path = DEFAULT_SCHEMA_PATH) -> list[str]:
+    return _errors(envelope_schema(seed_file, path), doc)
+
+
+# ---------------------------------------------------------------------------
+# Export raceTraits
+# ---------------------------------------------------------------------------
+
+
+def _tokens(s: str | None) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (s or "").lower())
+
+
+def race_trait_id(race: str, subrace: str | None, feature: str) -> str:
+    """Regola dei seed: race_<razza>_<sottorazza>_<tratto>, senza ripetere
+    token consecutivi ("Genasi (Fire)" + "Fire Resistance" -> race_genasi_fire_resistance)."""
+    out: list[str] = []
+    for tok in ["race", *_tokens(race), *_tokens(subrace), *_tokens(feature)]:
+        if not out or out[-1] != tok:
+            out.append(tok)
+    return "_".join(out)
+
+
+def _key(race: str | None, subrace: str | None, feature: str | None) -> tuple[str, ...]:
+    return (" ".join(_tokens(race)), " ".join(_tokens(subrace)), " ".join(_tokens(feature)))
+
+
+def export_race_traits(
+    doc: dict[str, Any],
+    sources: list[str],
+    seed: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Documento validato (dict stile Extracted, campo ``traits``) -> envelope
+    raceTraits.json. Ritorna (envelope, note).
+
+    - tratti con effects dichiarati assenti (nessun effetto numerico) sono
+      esclusi: raceTraits.json contiene solo ciò che cambia un numero;
+    - l'id riusa quello del seed quando razza/sottorazza/tratto coincidono
+      (gli id sono persistiti sui personaggi), altrimenti è generato;
+    - le sources del seed vengono unite a quelle del libro processato."""
+    known = {}
+    for d in (seed or {}).get("definitions", []):
+        known[_key(d.get("raceName"), d.get("subraceName"), d.get("featureName"))] = d
+
+    notes: list[str] = []
+    definitions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, trait in enumerate(doc.get("traits") or []):
+        def val(name: str, trait: dict = trait) -> Any:
+            leaf = trait.get(name) or {}
+            return leaf.get("value") if isinstance(leaf, dict) else None
+
+        race, subrace, feature = val("raceName"), val("subraceName"), val("featureName")
+        effects = val("effects")
+        if not effects:
+            notes.append(f"traits[{i}] {race}/{feature}: nessun effetto numerico, escluso")
+            continue
+        prev = known.get(_key(race, subrace, feature))
+        tid = prev["id"] if prev else race_trait_id(race, subrace, feature)
+        if tid in seen:
+            notes.append(f"traits[{i}] {tid}: duplicato, escluso")
+            continue
+        seen.add(tid)
+        entry: dict[str, Any] = {"id": tid, "raceName": race}
+        if subrace:
+            entry["subraceName"] = subrace
+        entry["featureName"] = feature
+        entry["grantedAtLevel"] = val("grantedAtLevel") or 1
+        entry["sources"] = sorted(set(sources) | set(prev["sources"] if prev else []))
+        entry["effects"] = copy.deepcopy(effects)
+        if prev and prev.get("notes"):
+            entry["notes"] = prev["notes"]
+        definitions.append(entry)
+        if prev and prev.get("effects") != effects:
+            notes.append(f"{tid}: effects diversi dal seed (seed={json.dumps(prev['effects'])})")
+
+    return {"version": 1, "definitions": definitions}, notes
+
+
+__all__ = [
+    "DEFAULT_SCHEMA_PATH",
+    "load_schema",
+    "decoding_schema",
+    "validate_def",
+    "envelope_schema",
+    "validate_envelope",
+    "race_trait_id",
+    "export_race_traits",
+]

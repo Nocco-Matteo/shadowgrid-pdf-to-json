@@ -44,6 +44,7 @@ class Task:
     item_field: str | None = None   # campo lista (task di un singolo elemento)
     item_index: int | None = None
     anchor: str | None = None
+    section: str | None = None      # titolo della sezione dell'elemento (Fase 4)
 
 
 def _regions_payload(db: DB, doc_id: str, page_no: int) -> list[dict]:
@@ -154,6 +155,15 @@ def build_tasks(
             page_no = it.get("page")
             page_regions = _regions_payload(db, doc_id, page_no) if page_no else []
             regions = _select_by_ids(page_regions, it.get("region_ids") or [])
+            section, section_page = it.get("section"), it.get("section_page")
+            if section and section_page:
+                # titolo della sezione (es. la razza): serve per i campi che
+                # stanno nell'intestazione e non nel paragrafo dell'elemento
+                heading = select_regions_for_label(
+                    _regions_payload(db, doc_id, section_page), section, margin=0)
+                ids = {r["region_id"] for r in regions}
+                if len(heading) == 1 and heading[0]["region_id"] not in ids:
+                    regions = heading + regions
             tasks.append(Task(
                 name=f"{lf}[{i}]",
                 fields=[lf],
@@ -163,6 +173,7 @@ def build_tasks(
                 item_field=lf,
                 item_index=i,
                 anchor=it.get("anchor"),
+                section=section,
             ))
 
     return tasks
@@ -210,21 +221,40 @@ def select_regions_for_label(regions: list[dict], label: str, margin: int = 1) -
     return regions[lo:hi]
 
 
+def _field_lines(task: Task) -> list[str]:
+    """Campi del task con la descrizione dallo schema (per un elemento di
+    lista: i campi del modello dell'elemento)."""
+    model = task.schema_strict
+    names = task.fields
+    if task.item_field is not None:
+        inner = _list_inner_type(model.model_fields[task.item_field].annotation)
+        if inner is not None and isinstance(inner, type) and issubclass(inner, BaseModel):
+            model, names = inner, list(inner.model_fields)
+    out = []
+    for name in names:
+        fi = model.model_fields.get(name)
+        desc = fi.description if fi is not None else None
+        out.append(f"- {name}: {desc}" if desc else f"- {name}")
+    return out
+
+
 def build_prompt(task: Task) -> str:
-    lines = ["REGIONI (id | tipo | testo):"]
+    lines = ["REGIONI (id | pagina | tipo | testo):"]
     for r in task.regions:
-        lines.append(f"[{r['region_id']}] {r['type']}: {r['text']}")
+        lines.append(f"[{r['region_id']}] p.{r.get('page')} {r['type']}: {r['text']}")
     lines.append("")
     if task.anchor:
         lines.append(f"ELEMENTO: {task.anchor}")
+        if task.section:
+            lines.append(f"SEZIONE: {task.section}")
         lines.append("Estrai SOLO i campi di questo elemento della lista.")
         lines.append("")
     lines.append("CAMPI DA ESTRARRE:")
-    for f in task.fields:
-        lines.append(f"- {f}")
+    lines += _field_lines(task)
     lines.append("")
     lines.append("REGOLE:")
-    lines.append("- per ogni campo restituisci un oggetto {value, quote, page, bbox, confidence}.")
+    lines.append("- per ogni campo restituisci un oggetto {value, quote, page, bbox, confidence}; "
+                 "page = la pagina della regione da cui copi la quote.")
     lines.append("- quote DEVE essere copiata carattere per carattere dal testo fornito sopra.")
     lines.append("- null è la risposta corretta quando il dato non è presente: "
                  "restituisci value=null E quote=null in quel caso.")

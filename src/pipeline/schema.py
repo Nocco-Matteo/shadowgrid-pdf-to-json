@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, ClassVar, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -89,6 +89,74 @@ class ContractStrict(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Compendium Shadow Grid (schema/compendium.schema.json): raceTraits.json
+# ---------------------------------------------------------------------------
+
+
+def compendium(def_name: str, description: str) -> Any:
+    """Campo il cui valore è una lista di oggetti ``$defs/<def_name>`` del
+    compendium: struttura vincolata in decodifica, validata con jsonschema."""
+    return Field(description=description, json_schema_extra={"compendium": def_name})
+
+
+class RaceTrait(BaseModel):
+    """Un tratto razziale che cambia un numero del personaggio (raceTraits.json)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    raceName: Extracted[str] = Field(description=(
+        "nome della razza come scritto nel titolo della sua sezione (es. 'Dwarf', "
+        "'Genasi (Fire)'); quote = quel titolo"))
+    subraceName: Extracted[str | None] = Field(
+        default_factory=lambda: Extracted(value=None, quote=None),
+        description=("sottorazza se il tratto è di una sottorazza (titolo 'Hill Dwarf' "
+                     "-> 'Hill'); altrimenti value=null e quote=null"))
+    featureName: Extracted[str] = Field(description=(
+        "nome del tratto come scritto, senza il punto finale (es. 'Dwarven Resilience')"))
+    grantedAtLevel: Extracted[int | None] = Field(
+        default_factory=lambda: Extracted(value=None, quote=None),
+        description=("livello a cui si ottiene il tratto SOLO se il testo lo dice "
+                     "(es. 'when you reach 5th level' -> 5); altrimenti value=null e quote=null"))
+    effects: Extracted[list[dict[str, Any]]] = compendium("featureEffect", (
+        "effetti numerici del tratto nella tassonomia chiusa del compendium "
+        "(resistance, ac_bonus, ac_formula, speed_bonus, hp_bonus_per_level, ...). "
+        "Solo ciò che cambia un numero del personaggio; quote = la frase della regola. "
+        "Velocità: speed_bonus.amount è la differenza da 30 feet ('35 feet' -> 5). "
+        "Se il tratto non cambia nessun numero: value=null e quote=null"))
+
+    @model_validator(mode="after")
+    def effects_match_compendium(self) -> RaceTrait:
+        from .compendium import validate_def
+
+        for i, effect in enumerate(self.effects.value or []):
+            errors = validate_def(effect, "featureEffect")
+            if errors:
+                raise ValueError(f"effects[{i}] non valido per il compendium: {errors[:3]}")
+        return self
+
+
+class RaceTraitsDoc(BaseModel):
+    """Schema di estrazione per il seed raceTraits.json del compendium."""
+
+    model_config = ConfigDict(extra="forbid")
+    seed_file: ClassVar[str] = "raceTraits.json"
+
+    traits: list[RaceTrait] = Field(default_factory=list, description=(
+        "tratti razziali: paragrafi che iniziano con il nome del tratto in grassetto "
+        "(es. 'Dwarven Resilience.') nelle sezioni '<Razza> Traits' di razze e "
+        "sottorazze. SOLO tratti che cambiano un numero del personaggio: resistenze o "
+        "immunità ai danni, classe armatura, velocità, punti ferita. anchor = il nome "
+        "del tratto; section = il titolo della razza o sottorazza a cui appartiene"))
+
+
+# Schemi selezionabili dalla CLI (--schema)
+SCHEMAS: dict[str, type[BaseModel]] = {
+    "race_traits": RaceTraitsDoc,
+    "contract": ContractStrict,
+}
+
+
+# ---------------------------------------------------------------------------
 # Derivazione SchemaLoose da SchemaStrict
 # ---------------------------------------------------------------------------
 
@@ -142,19 +210,59 @@ def loose(model: type[BaseModel]) -> type[BaseModel]:
 
 
 _CONSTRAINT_KEYS = {
-    "anchors",  # metadato per la Fase 5, non un vincolo per il decoder
+    "anchors", "compendium",  # metadati della pipeline, non vincoli per il decoder
     "pattern", "format", "minimum", "maximum", "exclusiveMinimum",
     "exclusiveMaximum", "multipleOf", "minLength", "maxLength",
 }
 
 
-def _strip_constraints(node: Any) -> Any:
-    """Rimuove dai JSON schema i vincoli di valore (verificati a valle dallo strict)."""
+def _strip_constraints(node: Any, in_properties: bool = False) -> Any:
+    """Rimuove dai JSON schema i vincoli di valore (verificati a valle dallo strict).
+    Le chiavi di un oggetto ``properties`` sono nomi di campo, non vincoli: un
+    campo chiamato "format" o "minimum" resta."""
     if isinstance(node, dict):
-        return {k: _strip_constraints(v) for k, v in node.items() if k not in _CONSTRAINT_KEYS}
+        return {k: _strip_constraints(v, in_properties=k == "properties" and not in_properties)
+                for k, v in node.items() if in_properties or k not in _CONSTRAINT_KEYS}
     if isinstance(node, list):
         return [_strip_constraints(v) for v in node]
     return node
+
+
+_CMP_PREFIX = "cmp__"
+
+
+def _prefix_refs(node: Any, prefix: str) -> Any:
+    if isinstance(node, dict):
+        return {k: (f"#/$defs/{prefix}{v.removeprefix('#/$defs/')}" if k == "$ref" else
+                    _prefix_refs(v, prefix)) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_prefix_refs(v, prefix) for v in node]
+    return node
+
+
+def _apply_compendium_refs(schema: dict[str, Any]) -> None:
+    """Campi ``Extracted[list[dict]]`` marcati ``compendium=<def>``: il valore
+    diventa una lista di oggetti dello schema vero del compendium (sotto-schema
+    per il decoder, con le sue $defs prefissate)."""
+    from .compendium import decoding_schema
+
+    defs = schema.setdefault("$defs", {})
+    holders = [schema, *list(defs.values())]
+    for holder in holders:
+        for prop in holder.get("properties", {}).values():
+            def_name = prop.get("compendium")
+            if not def_name:
+                continue
+            sub_schema = _prefix_refs(decoding_schema(def_name), _CMP_PREFIX)
+            for k, v in sub_schema.pop("$defs").items():
+                defs.setdefault(f"{_CMP_PREFIX}{k}", v)
+            ref = prop["$ref"].removeprefix("#/$defs/")
+            leaf_name = f"{ref}__{def_name}"
+            leaf = json.loads(json.dumps(defs[ref]))
+            leaf["properties"]["value"] = {"anyOf": [
+                {"type": "array", "items": sub_schema}, {"type": "null"}]}
+            defs[leaf_name] = leaf
+            prop["$ref"] = f"#/$defs/{leaf_name}"
 
 
 def guided_schema(
@@ -175,7 +283,9 @@ def guided_schema(
       omettendo la chiave (che in Fase 5 è un task fallito);
     - ``single_item``: le liste hanno esattamente un elemento (task per
       singolo elemento di lista)."""
-    schema = _strip_constraints(model.model_json_schema())
+    schema = model.model_json_schema()
+    _apply_compendium_refs(schema)
+    schema = _strip_constraints(schema)
     defs = schema.get("$defs", {})
 
     def tighten(obj: dict[str, Any]) -> None:
@@ -190,7 +300,9 @@ def guided_schema(
                 prop["minItems"] = prop["maxItems"] = 1
         obj["required"] = list(props)
 
-    for d in defs.values():
+    for name, d in defs.items():
+        if name.startswith(_CMP_PREFIX):
+            continue  # schema del compendium: required/opzionali sono i suoi
         if str(d.get("title", "")).startswith("Extracted"):
             for prop in d.get("properties", {}).values():
                 prop.pop("default", None)

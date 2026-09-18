@@ -1,7 +1,7 @@
 """Orchestratore CLI.
 
 Subcomandi: ingest, rasterize, ocr-a, ocr-b, reconcile, enumerate, extract,
-validate, review, eval, run (end-to-end). Ogni subcomando rispetta la macchina a
+validate, review, eval, export, run (end-to-end). Ogni subcomando rispetta la macchina a
 stati e salta lavoro già fatto. Gestione vita dei server vLLM tra le fasi.
 """
 
@@ -10,10 +10,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
 from . import (
+    compendium,
     phase1_ingest,
     phase2_ocr_a,
     phase3_ocr_b,
@@ -25,12 +27,80 @@ from . import (
 )
 from .config import get_settings
 from .db import DB
-from .schema import ContractStrict
+from .schema import SCHEMAS, _list_inner_type
 from .vllm_runner import VLLMRunner
 
 log = logging.getLogger(__name__)
 
-DEFAULT_SCHEMA = ContractStrict
+
+def _schema(args):
+    """Schema di estrazione scelto con --schema (default da config: schema_name)."""
+    return SCHEMAS[getattr(args, "schema", None) or get_settings().schema_name]
+
+
+def _list_fields(schema, args) -> list[tuple[str, str | None]]:
+    """Campi lista da enumerare in Fase 4 con la loro descrizione: quelli
+    passati con --list-field, altrimenti tutte le liste dello schema."""
+    from pydantic import BaseModel
+
+    auto = [name for name, fi in schema.model_fields.items()
+            if isinstance(_list_inner_type(fi.annotation), type)
+            and issubclass(_list_inner_type(fi.annotation), BaseModel)]
+    names = getattr(args, "list_fields", None) or auto
+    return [(n, schema.model_fields[n].description if n in schema.model_fields else None)
+            for n in names]
+
+
+def _same_schema(doc_id: str, schema, db: DB) -> bool:
+    """False (con errore esplicito) se il documento ha estrazioni di un altro
+    schema: mescolarle darebbe un documento che nessuno dei due schemi accetta."""
+    fields = {re.split(r"[.\[$]", r["field_path"], maxsplit=1)[0]
+              for r in db.get_extractions(doc_id)}
+    foreign = sorted(fields - set(schema.model_fields))
+    if foreign:
+        log.error("%s ha estrazioni di un altro schema (%s): documento saltato. "
+                  "Per riestrarlo con --schema %s (OCR conservato): "
+                  "python -m pipeline.cli reset-extraction --doc-id %s",
+                  doc_id, ", ".join(foreign[:5]), _schema_name(schema), doc_id)
+        return False
+    return True
+
+
+def _schema_name(schema) -> str:
+    return next((k for k, v in SCHEMAS.items() if v is schema), schema.__name__)
+
+
+def _enumerate(doc_id: str, schema, args, db: DB, s) -> None:
+    for lf, desc in _list_fields(schema, args):
+        phase4_enumerate.run(doc_id, lf, db=db, settings=s, description=desc)
+
+
+def export_doc(doc_id: str, schema, db: DB, s, sources: list[str]) -> Path | None:
+    """Scrive l'envelope del seed (solo elementi validati) validato contro il
+    compendium. Ritorna il path, o None se lo schema non ha un seed."""
+    seed_file = getattr(schema, "seed_file", None)
+    if seed_file is None:
+        return None
+    if not sources:
+        log.error("Export %s: manca --source (codice del libro, es. players_handbook)", doc_id)
+        return None
+    doc = phase6_validate._build_document(db.get_extractions(doc_id, status="validated"))
+    seed_path = compendium.DEFAULT_SCHEMA_PATH.parents[1] / "seeds" / seed_file
+    seed = json.loads(seed_path.read_text(encoding="utf-8")) if seed_path.exists() else None
+    envelope, notes = compendium.export_race_traits(doc, sources, seed)
+    errors = compendium.validate_envelope(envelope, seed_file)
+    out_dir = Path(s.work_dir).parent / "export" / doc_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / seed_file
+    out.write_text(json.dumps(envelope, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    (out_dir / f"{seed_file}.notes.txt").write_text("\n".join(notes + errors) + "\n",
+                                                    encoding="utf-8")
+    if errors:
+        log.error("Export %s NON valido contro il compendium (%d errori): %s",
+                  out, len(errors), errors[:3])
+    log.info("Export %s: %d definizioni, %d note (%s)", out, len(envelope["definitions"]),
+             len(notes), out_dir / f"{seed_file}.notes.txt")
+    return out
 
 
 def setup_logging(verbose: bool) -> None:
@@ -93,8 +163,9 @@ def cmd_enumerate(args) -> None:
     s.extractor_url = url
     try:
         for doc_id in _resolve_doc_ids(args, db):
-            for lf in args.list_fields or []:
-                phase4_enumerate.run(doc_id, lf, db=db, settings=s)
+            if not _same_schema(doc_id, _schema(args), db):
+                continue
+            _enumerate(doc_id, _schema(args), args, db, s)
     finally:
         runner.stop()
 
@@ -107,7 +178,9 @@ def cmd_extract(args) -> None:
     s.extractor_url = url
     try:
         for doc_id in _resolve_doc_ids(args, db):
-            phase5_extract.run(doc_id, DEFAULT_SCHEMA, db=db, settings=s)
+            if not _same_schema(doc_id, _schema(args), db):
+                continue
+            phase5_extract.run(doc_id, _schema(args), db=db, settings=s)
     finally:
         runner.stop()
 
@@ -122,7 +195,9 @@ def cmd_validate(args) -> None:
     s.extractor_url = runner.start_extractor(port=8080, phase="extract")
     try:
         for doc_id in _resolve_doc_ids(args, db):
-            phase6_validate.run(doc_id, DEFAULT_SCHEMA, db=db, settings=s)
+            if not _same_schema(doc_id, _schema(args), db):
+                continue
+            phase6_validate.run(doc_id, _schema(args), db=db, settings=s)
     finally:
         runner.stop()
 
@@ -130,7 +205,7 @@ def cmd_validate(args) -> None:
 def cmd_review(args) -> None:
     db = DB()
     for doc_id in _resolve_doc_ids(args, db):
-        phase7_review.launch_ui(doc_id, db=db, schema_strict=DEFAULT_SCHEMA)
+        phase7_review.launch_ui(doc_id, db=db, schema_strict=_schema(args))
 
 
 def cmd_eval(args) -> None:
@@ -148,7 +223,7 @@ def cmd_run(args) -> None:
     """End-to-end: ingest -> rasterize -> ocr-a -> (ocr-b) -> enumerate -> extract -> validate."""
     s = get_settings()
     db = DB(s)
-    schema = DEFAULT_SCHEMA
+    schema = _schema(args)
     for p in args.paths:
         doc_id = phase1_ingest.ingest(Path(p), db=db)
         phase1_ingest.rasterize(doc_id, db=db, degraded=args.degraded)
@@ -182,18 +257,37 @@ def cmd_run(args) -> None:
     # Enumerate + Extract + Validate (stesso modello: un solo avvio del server).
     # La validazione avviene con il server ancora attivo: i retry di Fase 6
     # rilanciano l'estrattore via HTTP.
+    doc_ids = [phase1_ingest.ingest(Path(p), db=db) for p in args.paths]
+    doc_ids = [d for d in doc_ids if _same_schema(d, schema, db)]
+    if not doc_ids:
+        return
     s.extractor_url = runner.start_extractor(port=8080, phase="extract")
     try:
-        for p in args.paths:
-            doc_id = phase1_ingest.ingest(Path(p), db=db)
-            for lf in args.list_fields or []:
-                phase4_enumerate.run(doc_id, lf, db=db, settings=s)
+        for doc_id in doc_ids:
+            _enumerate(doc_id, schema, args, db, s)
             phase5_extract.run(doc_id, schema, db=db, settings=s)
-        for p in args.paths:
-            doc_id = phase1_ingest.ingest(Path(p), db=db)
+        for doc_id in doc_ids:
             phase6_validate.run(doc_id, schema, db=db, settings=s)
     finally:
         runner.stop()
+
+    for doc_id in doc_ids:
+        export_doc(doc_id, schema, db, s, args.sources or s.source_codes)
+
+
+def cmd_reset_extraction(args) -> None:
+    db = DB()
+    for doc_id in _resolve_doc_ids(args, db):
+        db.reset_extraction(doc_id)
+        log.info("Estrazione azzerata per %s: stato reconciled (OCR conservato)", doc_id)
+
+
+def cmd_export(args) -> None:
+    s = get_settings()
+    db = DB(s)
+    for doc_id in _resolve_doc_ids(args, db):
+        if _same_schema(doc_id, _schema(args), db):
+            export_doc(doc_id, _schema(args), db, s, args.sources or s.source_codes)
 
 
 def _resolve_doc_ids(args, db: DB) -> list[str]:
@@ -208,6 +302,8 @@ def _resolve_doc_ids(args, db: DB) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pipeline", description="Pipeline estrazione PDF->JSON")
     p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument("--schema", choices=sorted(SCHEMAS),
+                   help="schema di estrazione (default: schema_name in pipeline.yaml)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def add_targets(sp):
@@ -263,7 +359,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--degraded", action="store_true")
     sp.add_argument("--skip-ocr-b", action="store_true")
     sp.add_argument("--list-field", dest="list_fields", nargs="*")
+    sp.add_argument("--source", dest="sources", action="append",
+                    help="codice del libro per l'export (es. players_handbook), ripetibile")
     sp.set_defaults(func=cmd_run)
+
+    sp = sub.add_parser("reset-extraction",
+                        help="cancella estrazioni/task e torna a reconciled (OCR conservato)")
+    add_targets(sp)
+    sp.set_defaults(func=cmd_reset_extraction)
+
+    sp = sub.add_parser("export", help="scrive il seed del compendium dagli elementi validati")
+    add_targets(sp)
+    sp.add_argument("--source", dest="sources", action="append",
+                    help="codice del libro (es. players_handbook), ripetibile")
+    sp.set_defaults(func=cmd_export)
     return p
 
 
