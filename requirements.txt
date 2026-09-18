@@ -10,7 +10,7 @@
 # --- Core (sempre necessari) ---
 pydantic==2.13.5
 pydantic-settings==2.15.0
-pyyaml>=6.0.3
+pyyaml>=6.0.2  # paddlex 3.3.x pinna PyYAML==6.0.2: non alzare il minimo
 rapidfuzz==3.14.6
 
 # --- OCR / image processing ---
