@@ -54,12 +54,20 @@ Write-Host "  Questo passo e lungo. Vai a prendere un caffe." -ForegroundColor Y
 Write-Host ""
 
 # Usa i file locali della repo (quella da cui lanci questo script):
-# passa setup_inner.sh a bash via stdin e il path del repo come argomento.
-# Niente download da GitHub -> setup identico al codice che hai in locale.
+# scrive una copia LF di setup_inner.sh in %TEMP% e la esegue come FILE, passando
+# il path del repo come argomento. Niente download da GitHub -> setup identico al
+# codice che hai in locale.
+# NON passare lo script via stdin (bash -s): senza stdin/tty interattivo sudo non
+# riesce a chiedere la password (il prompt non accetta input e legge lo script).
 $wslPath = (wsl -d Ubuntu-22.04 -- wslpath -a ($PSScriptRoot -replace '\\','/')).Trim()
 Write-Host "  Repo: $PSScriptRoot -> $wslPath" -ForegroundColor Cyan
 $script = (Get-Content "$PSScriptRoot\setup_inner.sh" -Raw) -replace "`r`n", "`n"
-$script | wsl -d Ubuntu-22.04 -- bash -s -- "$wslPath"
+$tmpSh = Join-Path $env:TEMP "shadowgrid_setup_inner.sh"
+[System.IO.File]::WriteAllText($tmpSh, $script, (New-Object System.Text.UTF8Encoding $false))
+$tmpWsl = (wsl -d Ubuntu-22.04 -- wslpath -a ($tmpSh -replace '\\','/')).Trim()
+
+Write-Host "  Ti verra chiesta la password di Ubuntu (sudo): digitala anche se non vedi caratteri." -ForegroundColor Yellow
+wsl -d Ubuntu-22.04 -- bash $tmpWsl $wslPath
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "  Setup interno FALLITO (exit code $LASTEXITCODE) - vedi l'output sopra." -ForegroundColor Red
