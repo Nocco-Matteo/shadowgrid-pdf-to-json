@@ -35,7 +35,7 @@ from rapidfuzz.fuzz import partial_ratio
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
-from .schema import _is_extracted_model, _list_inner_type, loose
+from .schema import _is_extracted_model, _list_inner_type, guided_schema
 from .text_norm import normalize
 
 log = logging.getLogger(__name__)
@@ -364,7 +364,10 @@ def _validate_one(
     if page_no:
         page_full_text = db.get_page_text(doc_id, page_no)
     if not gate_grounding(quote, page_full_text, s.grounding_threshold):
-        log.warning("Grounding fallito per %s (attempt %d)", field_path, attempt)
+        score = partial_ratio(normalize(quote or ""), normalize(page_full_text)) if page_full_text else 0
+        log.warning("Grounding fallito per %s (attempt %d): quote=%r page=%s "
+                    "testo pagina=%d caratteri score=%.0f", field_path, attempt,
+                    quote, page_no, len(page_full_text), score)
         return _maybe_retry(doc_id, field_path, row, schema_strict, db, s, client,
                             err="grounding_failed")
 
@@ -492,11 +495,20 @@ def _retry_extract(
         {"region_id": r["region_id"], "type": r["region_type"], "text": r["text"]}
         for pn in page_nos for r in db.get_canonical_regions(doc_id, pn)
     ]
+    # Schema del solo campo in retry. Per un elemento di lista (parties[1].name)
+    # il modello risponde con una lista di UN elemento: l'indice va riletto a 0.
+    top = _SEG.match(field_path)
+    top_field, item_idx = top.group(1), top.group(2)
     lines = ["REGIONI (id | tipo | testo):"]
     lines += [f"[{r['region_id']}] {r['type']}: {r['text']}" for r in regions]
     lines += [
         "",
         f"CAMPO DA ESTRARRE: {field_path}",
+    ]
+    if item_idx is not None:
+        lines.append(f"Rispondi con la lista '{top_field}' contenente SOLO l'elemento a cui "
+                     f"appartiene il valore precedente (compila tutti i suoi campi).")
+    lines += [
         "",
         "REGOLE:",
         "- restituisci un oggetto {value, quote, page, bbox, confidence}.",
@@ -512,11 +524,14 @@ def _retry_extract(
                 "confidence": row["confidence"]}
     try:
         raw = client.extract("\n".join(lines),
-                             guided_json_schema=loose(schema_strict).model_json_schema())
+                             guided_json_schema=guided_schema(
+                                 schema_strict, [top_field], single_item=item_idx is not None))
     except Exception as e:
         log.warning("Retry extract fallito (%s): %s", field_path, e)
         return fallback
-    leaf = _get_path(raw, field_path)
+    path_in_raw = field_path if item_idx is None else (
+        f"{top_field}[0]" + field_path[top.end():])
+    leaf = _get_path(raw, path_in_raw)
     if not isinstance(leaf, dict) or ("value" not in leaf and "quote" not in leaf):
         log.warning("Retry: campo %s assente nella risposta", field_path)
         return fallback

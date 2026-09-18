@@ -160,3 +160,21 @@ def test_null_rows_persisted(env):
     assert vat["value_json"] is None
     assert vat["quote"] is None
     assert vat["status"] == "pending"
+
+
+def test_missing_or_invalid_page_falls_back(env):
+    """Regressione smoke: le regioni nel prompt non riportano la pagina, il
+    modello può dare page=null o inventarla. Senza pagina valida il grounding
+    di Fase 6 confronta con un testo vuoto e fallisce anche su quote corrette."""
+    db, s = env
+
+    class NoPage:
+        def extract(self, prompt, images_b64=None, guided_json_schema=None):
+            payload = _payload()
+            payload["contract_number"]["page"] = None
+            payload["issue_date"]["page"] = 99  # pagina inesistente
+            return payload
+
+    run("d", ContractStrict, db=db, settings=s, client=NoPage())
+    assert db.latest_extraction("d", "contract_number")["page_no"] == 1
+    assert db.latest_extraction("d", "issue_date")["page_no"] == 1

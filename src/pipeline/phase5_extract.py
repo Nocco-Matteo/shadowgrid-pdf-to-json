@@ -243,6 +243,7 @@ def run(
 
     client = client or ExtractorClient(s.extractor_url, s.extractor_model)
     tasks = build_tasks(doc_id, schema_strict, db, s)
+    page_nos = {p["page_no"] for p in db.get_pages(doc_id)}
 
     failed = False
     for task in tasks:
@@ -286,12 +287,17 @@ def run(
             failed = True
             continue
         for row in rows:
+            # Le regioni nel prompt non riportano la pagina: se il modello non
+            # la dà (o ne inventa una), vale quella del task (anchor/inventario).
+            page = row["page"] if row["page"] in page_nos else task.page_no
+            if page is None and len(page_nos) == 1:
+                page = next(iter(page_nos))
             db.upsert_extraction(
                 doc_id=doc_id,
                 field_path=row["field_path"],
                 value_json=row["value_json"],
                 quote=row["quote"],
-                page_no=row["page"],
+                page_no=page,
                 bbox=_parse_bbox(row["bbox"]),
                 attempt=1,
                 status="pending",

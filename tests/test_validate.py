@@ -360,3 +360,56 @@ def test_validate_from_needs_review_finalizes(tmp_path):
 
     run("d", ContractStrict, db=db, settings=s)
     assert db.get_status("d") == "done"
+
+
+def test_retry_list_item_reads_single_element_response(tmp_path):
+    """Regressione smoke: il retry di parties[1].x riceve una lista di UN
+    elemento (schema single_item) e deve leggerne l'elemento 0, non l'indice 1."""
+    from pipeline.config import Settings
+    from pipeline.db import DB
+    from pipeline.phase6_validate import run
+    from pipeline.schema import ContractStrict
+
+    s = Settings(db_path=tmp_path / "t.db", work_dir=tmp_path / "work")
+    s.work_dir.mkdir(parents=True, exist_ok=True)
+    db = DB(s)
+    db.upsert_document("d", "/a.pdf", "sha", 1)
+    db.set_status("d", "extracted")
+    db.set_page("d", 1, full_text=(
+        "CONTRATTO N. 44/B\nData emissione: 2024-03-15\nImporto: 1.234,50 EUR\n"
+        "Valuta: EUR\nMario Rossi - Acquirente\nLucia Bianchi - Venditore"
+    ))
+    for fp, v, q in [("contract_number", '"44/B"', "CONTRATTO N. 44/B"),
+                     ("issue_date", '"2024-03-15"', "Data emissione: 2024-03-15"),
+                     ("amount_eur", "1234.5", "Importo: 1.234,50 EUR"),
+                     ("currency", '"EUR"', "Valuta: EUR"),
+                     ("parties[0].name", '"Mario Rossi"', "Mario Rossi"),
+                     ("parties[0].role", '"Acquirente"', "Acquirente")]:
+        db.upsert_extraction("d", fp, v, q, 1, None, 1, "pending")
+    db.upsert_extraction("d", "parties$inventory",
+                         '[{"anchor": "Mario Rossi", "page": 1}, {"anchor": "Lucia Bianchi", "page": 1}]',
+                         None, None, None, 1, "validated")
+    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "pending")
+    # parties[1].name: tentativo 1 senza pagina -> grounding fallisce
+    db.upsert_extraction("d", "parties[1].name", '"Lucia Bianchi"', "Lucia Bianchi",
+                         None, None, 1, "pending")
+    db.upsert_extraction("d", "parties[1].role", '"Venditore"', "Venditore", 1, None, 1, "pending")
+    db.upsert_extraction("d", "parties[1].vat_id", None, None, None, None, 1, "pending")
+
+    schemas = []
+
+    def leaf(v):
+        return {"value": v, "quote": v, "page": 1, "bbox": None, "confidence": "high"}
+
+    class Fixer:
+        def extract(self, prompt, images_b64=None, guided_json_schema=None):
+            schemas.append(guided_json_schema)
+            return {"parties": [{"name": leaf("Lucia Bianchi"), "role": leaf("Venditore"),
+                                 "vat_id": {"value": None, "quote": None}}]}
+
+    run("d", ContractStrict, db=db, settings=s, client=Fixer())
+
+    row = db.latest_extraction("d", "parties[1].name")
+    assert row["attempt"] == 2 and row["status"] == "validated"
+    assert row["page_no"] == 1
+    assert schemas and schemas[0]["properties"]["parties"]["maxItems"] == 1
