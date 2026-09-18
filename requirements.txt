@@ -2,7 +2,7 @@
 # Install: pip install -r requirements.txt
 #
 # Sviluppo (senza GPU): così com'è (i pacchetti CUDA sono commentati).
-# Target machine (RTX 4090, CUDA 12.1+): scommentare vllm/paddlepaddle-gpu.
+# Target machine (RTX 4090): scommentare vllm/paddleocr/paddlepaddle (CPU).
 
 # Il pacchetto stesso in modalità editabile
 -e .
@@ -28,8 +28,11 @@ pytest-cov==7.1.0
 ruff==0.16.6
 
 # --- Pesanti (CUDA) — scommentare sulla target machine ---
-# Nota: vllm si tira dietro la sua torch CUDA compatibile; installalo PRIMA
-# di paddlepaddle-gpu per evitare conflitti di versione torch.
+# Nota: vllm si tira dietro la sua torch CUDA (13.x): Paddle è volutamente la
+# build CPU (`paddlepaddle`, non `-gpu`), usata solo per il layout detection;
+# il riconoscimento gira su vLLM/GPU. NON installare paddlepaddle-gpu nello
+# stesso venv: sovrascrive `paddle` e le versioni 2.x rompono paddlex 3.x.
+# `paddleocr[doc-parser]` >= 3.3 è necessario per PaddleOCRVL.
 # vllm>=0.5
-# paddleocr>=2.7
-# paddlepaddle-gpu>=2.6
+# paddleocr[doc-parser]>=3.3
+# paddlepaddle>=3.2

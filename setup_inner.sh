@@ -63,8 +63,15 @@ pip install --upgrade pip wheel
 
 # Scommenta i pesanti CUDA
 sed -i 's/^# vllm>=/vllm>=/' requirements.txt
-sed -i 's/^# paddleocr>=/paddleocr>=/' requirements.txt
-sed -i 's/^# paddlepaddle-gpu>=/paddlepaddle-gpu>=/' requirements.txt
+sed -i 's/^# paddleocr\[/paddleocr[/' requirements.txt
+sed -i 's/^# paddlepaddle>=/paddlepaddle>=/' requirements.txt
+# Un paddlepaddle-gpu rimasto da un vecchio setup sovrascriverebbe `paddle`
+# (2.x, incompatibile con paddlex 3.x). Disinstallarlo lascia il modulo
+# `paddle` senza file: la CPU va reinstallata a forza.
+if pip show paddlepaddle-gpu >/dev/null 2>&1; then
+  pip uninstall -y paddlepaddle-gpu
+  pip install --force-reinstall --no-deps "paddlepaddle>=3.2"
+fi
 pip install -r requirements.txt
 
 echo ""
