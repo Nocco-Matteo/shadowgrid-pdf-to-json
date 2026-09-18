@@ -35,8 +35,9 @@ extractor_url: "http://127.0.0.1:8080/v1"
 
 # --- Server vLLM dell'estrattore (limiti VRAM, RTX 4090 24GB in WSL) ---
 # extractor_max_model_len: 16384          # contesto massimo (prompt + risposta)
-# extractor_max_num_batched_tokens: 4096  # picco attivazioni in prefill
-# extractor_gpu_memory_utilization: 0.92  # > ~0.93 in WSL: vLLM non parte
+# extractor_max_num_batched_tokens: 2048  # picco attivazioni in prefill
+# extractor_gpu_memory_utilization: 0.93  # > ~0.935 in WSL: vLLM non parte
+# extractor_enforce_eager: true           # niente CUDA graph (più VRAM per la KV)
 # extractor_text_only: true               # niente encoder visivo (~0.8GB + profiling)
 # extractor_max_num_seqs: 8               # richieste parallele max
 # extractor_vllm_args: ["--enforce-eager"]  # argomenti extra per `vllm serve`

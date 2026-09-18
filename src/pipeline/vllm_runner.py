@@ -25,7 +25,8 @@ log = logging.getLogger(__name__)
 _ERROR_RE = re.compile(r"\b\w*(?:Error|Exception): |CUDA out of memory")
 _MEMORY_RE = re.compile(
     r"Model loading took|Available KV cache memory|GPU KV cache size|"
-    r"Maximum concurrency|Free memory on device|max seq len",
+    r"Maximum concurrency|Free memory on device|max seq len|"
+    r"peak activation|non-torch|torch peak|CUDA ?graph memory|Memory profiling",
     re.I,
 )
 # Prefisso tipo "(EngineCore pid=12) ERROR 09-18 21:38:02 [core.py:1374] "
@@ -124,6 +125,8 @@ class VLLMRunner:
             "--gpu-memory-utilization", str(s.extractor_gpu_memory_utilization),
             "--max-num-seqs", str(s.extractor_max_num_seqs),
         ]
+        if s.extractor_enforce_eager:
+            extra.append("--enforce-eager")
         if s.extractor_text_only:
             extra += ["--limit-mm-per-prompt", '{"image": 0, "video": 0}']
         return self.start(

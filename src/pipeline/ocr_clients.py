@@ -343,7 +343,7 @@ class ResolverClient:
 
 
 # ---------------------------------------------------------------------------
-# Estrattore (Qwen3.8-27B AWQ) con guided_json via xgrammar
+# Estrattore (Qwen3.8-27B AWQ) con output vincolato a JSON schema
 # ---------------------------------------------------------------------------
 
 
@@ -361,7 +361,7 @@ class ExtractorClient:
         images_b64: list[str] | None = None,
         guided_json_schema: dict | None = None,
     ) -> dict:
-        """Chiama l'estrattore con guided_json (SchemaLoose del task)."""
+        """Chiama l'estrattore vincolando l'output allo SchemaLoose del task."""
         from openai import OpenAI
 
         client = OpenAI(base_url=self.url, api_key="EMPTY")
@@ -375,12 +375,16 @@ class ExtractorClient:
             "temperature": self.temperature,
             "seed": self.seed,
             "max_tokens": 2048,
+            # Qwen3.x ragiona (<think>) prima di rispondere: qui serve solo il JSON
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
         }
         if guided_json_schema is not None:
-            # vLLM supporta extra_body con guided_json / guided_decoding_backend
-            kwargs["extra_body"] = {
-                "guided_json": guided_json_schema,
-                "guided_decoding_backend": "xgrammar",
+            # response_format standard OpenAI: vLLM (structured outputs, xgrammar)
+            # e llama-server lo applicano entrambi. Il vecchio extra_body
+            # `guided_json` è stato rimosso da vLLM e verrebbe ignorato in silenzio.
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "extraction", "schema": guided_json_schema},
             }
 
         resp = client.chat.completions.create(**kwargs)

@@ -1,7 +1,7 @@
 """Schema come fonte unica di verità.
 
 - ``Extracted[T]``: ogni campo foglia è un oggetto con provenienza (value/quote/page/bbox/confidence).
-- ``SchemaLoose``: derivato dallo strict, passato al decoder come ``guided_json`` (solo tipi/struttura,
+- ``SchemaLoose``: derivato dallo strict, passato al decoder come JSON schema (``response_format``) (solo tipi/struttura,
   tutto Optional, niente pattern/ge/le/validator) -> grammatica semplice, compilazione xgrammar veloce.
 - ``SchemaStrict``: validazione a valle con tutti i vincoli e validator cross-field.
 """

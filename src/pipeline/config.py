@@ -62,10 +62,13 @@ class Settings(BaseSettings):
 
     # Server vLLM dell'estrattore (27B su 24GB: i default di vLLM non lasciano
     # memoria per la KV cache). gpu_memory_utilization è una frazione della VRAM
-    # totale: in WSL Windows ne tiene ~1.5GB, oltre ~0.93 vLLM non parte.
+    # totale: in WSL Windows ne tiene ~1.5GB (22.45/23.99 GiB liberi), oltre
+    # ~0.935 vLLM non parte.
     extractor_max_model_len: int = 16384
-    extractor_max_num_batched_tokens: int = 4096
-    extractor_gpu_memory_utilization: float = 0.92
+    extractor_max_num_batched_tokens: int = 2048
+    extractor_gpu_memory_utilization: float = 0.93
+    # Niente CUDA graph: più lento ma libera VRAM per la KV cache
+    extractor_enforce_eager: bool = True
     # Il 27B è multimodale ma riceve solo testo: senza encoder visivo vLLM
     # risparmia ~0.8GB di pesi e il profiling delle immagini. Da disattivare
     # se un giorno l'estrattore riceve images_b64.

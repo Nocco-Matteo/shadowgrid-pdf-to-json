@@ -7,7 +7,7 @@ Avvia vLLM con Qwen3.8-27B in AWQ 4-bit.
   Mai il documento intero. Se non sai quali regioni siano pertinenti, aggiungi un passo
   di routing (BM25 + embedding sulle regioni, top-k); per moduli strutturati la posizione
   è di solito stabile e puoi ancorarla a un'etichetta.
-- Parametri: temperature=0, seed fisso, guided_json=SchemaLoose del task, backend xgrammar.
+- Parametri: temperature=0, seed fisso, output vincolato allo SchemaLoose del task (response_format json_schema).
 - Struttura del prompt, in quest'ordine:
     1. le regioni, ciascuna con il suo region_id;
     2. la definizione dei campi da estrarre;

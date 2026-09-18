@@ -43,7 +43,7 @@ def test_start_extractor_passes_memory_limits(monkeypatch, tmp_path):
     assert args.count("--max-num-batched-tokens") == 1
     assert _flag(args, "--max-num-seqs") == "8"
     assert json.loads(_flag(args, "--limit-mm-per-prompt")) == {"image": 0, "video": 0}
-    assert args[-1] == "--enforce-eager"
+    assert "--enforce-eager" in args
 
 
 def test_ocr_start_unchanged(monkeypatch, tmp_path):
@@ -90,3 +90,12 @@ def test_start_extractor_multimodal(monkeypatch, tmp_path):
     calls = _capture(monkeypatch, tmp_path)
     vllm_runner.VLLMRunner(Settings(extractor_text_only=False)).start_extractor()
     assert "--limit-mm-per-prompt" not in calls[0]
+
+
+def test_start_extractor_default_limits(monkeypatch, tmp_path):
+    calls = _capture(monkeypatch, tmp_path)
+    vllm_runner.VLLMRunner(Settings()).start_extractor()
+    args = calls[0]
+    assert _flag(args, "--gpu-memory-utilization") == "0.93"
+    assert _flag(args, "--max-num-batched-tokens") == "2048"
+    assert args.count("--enforce-eager") == 1
