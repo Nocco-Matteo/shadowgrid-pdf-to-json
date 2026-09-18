@@ -1,4 +1,4 @@
-# setup_windows.ps1 — Setup completo da Windows.
+# setup_windows.ps1 - Setup completo da Windows.
 # Avvia da PowerShell (admin):
 #   powershell -ExecutionPolicy Bypass -File setup_windows.ps1
 #   powershell -ExecutionPolicy Bypass -File setup_windows.ps1 -SkipSmoke
@@ -62,7 +62,7 @@ $script = (Get-Content "$PSScriptRoot\setup_inner.sh" -Raw) -replace "`r`n", "`n
 $script | wsl -d Ubuntu-22.04 -- bash -s -- "$wslPath"
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
-    Write-Host "  Setup interno FALLITO (exit code $LASTEXITCODE) — vedi l'output sopra." -ForegroundColor Red
+    Write-Host "  Setup interno FALLITO (exit code $LASTEXITCODE) - vedi l'output sopra." -ForegroundColor Red
     Write-Host "  Il setup non e' completo: correggi e rilancia." -ForegroundColor Red
     exit 1
 }
@@ -79,7 +79,7 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  Smoke test OK" -ForegroundColor Green
     } else {
-        Write-Host "  Smoke test FALLITO — vedi sopra e runs/vllm_*.log" -ForegroundColor Red
+        Write-Host "  Smoke test FALLITO - vedi sopra e runs/vllm_*.log" -ForegroundColor Red
     }
 }
 
