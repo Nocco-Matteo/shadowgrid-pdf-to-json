@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
-from .schema import _list_inner_type, flatten_extracted, guided_schema
+from .schema import _list_inner_type, field_anchors, flatten_extracted, guided_schema
 from .text_norm import normalize
 
 log = logging.getLogger(__name__)
@@ -55,15 +55,15 @@ def _regions_payload(db: DB, doc_id: str, page_no: int) -> list[dict]:
     ]
 
 
-def _field_page(db: DB, doc_id: str, pages, field_name: str) -> int | None:
-    """Pagina della prima regione che contiene il nome campo (anchor euristica)."""
-    target = normalize(field_name.replace("_", " "))
-    if not target:
-        return None
-    for p in pages:
-        for r in db.get_canonical_regions(doc_id, p["page_no"]):
-            if target in normalize(r["text"] or ""):
-                return p["page_no"]
+def _field_page(db: DB, doc_id: str, pages, labels: list[str]) -> int | None:
+    """Pagina della prima regione che contiene un'etichetta del campo (anchor
+    euristica). Le etichette si provano in ordine di priorità."""
+    targets = [t for t in (normalize(label) for label in labels) if t]
+    for target in targets:
+        for p in pages:
+            for r in db.get_canonical_regions(doc_id, p["page_no"]):
+                if target in normalize(r["text"] or ""):
+                    return p["page_no"]
     return None
 
 
@@ -80,11 +80,15 @@ def _select_by_ids(regions: list[dict], ids: list[int], margin: int = 1) -> list
     return [regions[i] for i in sorted(keep)] or regions
 
 
-def _select_for_fields(regions: list[dict], fields: list[str], margin: int = 1) -> list[dict]:
+def _select_for_fields(regions: list[dict], labels_by_field: list[list[str]],
+                       margin: int = 1) -> list[dict]:
     """Unione delle selezioni per-etichetta; fallback: tutte le regioni passate."""
     keep: set[int] = set()
-    for f in fields:
-        sel = select_regions_for_label(regions, f.replace("_", " "), margin)
+    for labels in labels_by_field:
+        found = next((lb for lb in labels
+                      if any(normalize(lb) in normalize(r["text"] or "") for r in regions)),
+                     labels[-1])
+        sel = select_regions_for_label(regions, found, margin)
         ids = {r["region_id"] for r in sel}
         keep.update(i for i, r in enumerate(regions) if r["region_id"] in ids)
     return [regions[i] for i in sorted(keep)] or regions
@@ -119,14 +123,16 @@ def build_tasks(
     # Campi piatti: gruppi per pagina anchor, poi chunk per max_fields_per_task
     by_page: dict[int | None, list[str]] = {}
     for f in flat_fields:
-        by_page.setdefault(_field_page(db, doc_id, pages, f), []).append(f)
+        by_page.setdefault(_field_page(db, doc_id, pages, field_anchors(schema_strict, f)),
+                           []).append(f)
 
     for page_no, fields in sorted(by_page.items(), key=lambda kv: (kv[0] is None, kv[0])):
         if page_no is None:
             log.warning("Campi non ancorabili a una pagina: %s -> contesto intero", fields)
             regions = [r for p in pages for r in _regions_payload(db, doc_id, p["page_no"])]
         else:
-            regions = _select_for_fields(_regions_payload(db, doc_id, page_no), fields)
+            regions = _select_for_fields(_regions_payload(db, doc_id, page_no),
+                                         [field_anchors(schema_strict, f) for f in fields])
         for i in range(0, len(fields), s.max_fields_per_task):
             chunk = fields[i:i + s.max_fields_per_task]
             tasks.append(Task(
@@ -193,9 +199,10 @@ def _task_missing_fields(task: Task, rows: list[dict], schema_strict: type) -> s
 
 def select_regions_for_label(regions: list[dict], label: str, margin: int = 1) -> list[dict]:
     """Seleziona regioni pertinenti a un'etichetta + `margin` regioni sopra/sotto.
-    Implementazione semplice: match case-insensitive sul testo della regione."""
-    norm_label = label.lower()
-    idx = next((i for i, r in enumerate(regions) if norm_label in r["text"].lower()), None)
+    Implementazione semplice: match sul testo normalizzato della regione."""
+    norm_label = normalize(label)
+    idx = next((i for i, r in enumerate(regions)
+                if norm_label and norm_label in normalize(r["text"] or "")), None)
     if idx is None:
         return regions  # fallback: tutte
     lo = max(0, idx - margin)

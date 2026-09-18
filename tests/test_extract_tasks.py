@@ -178,3 +178,25 @@ def test_missing_or_invalid_page_falls_back(env):
     run("d", ContractStrict, db=db, settings=s, client=NoPage())
     assert db.latest_extraction("d", "contract_number")["page_no"] == 1
     assert db.latest_extraction("d", "issue_date")["page_no"] == 1
+
+
+def test_flat_fields_anchored_by_schema_labels(env):
+    """Regressione smoke: i nomi Python dei campi (contract_number, amount_eur)
+    non compaiono in un documento italiano; le etichette `anchors` dello schema
+    sì. Senza ancora il task riceve l'intero documento (warning + contesto enorme
+    sui PDF veri)."""
+    from pipeline.phase5_extract import build_tasks
+
+    db, s = env
+    tasks = build_tasks("d", ContractStrict, db, s)
+    flat = [t for t in tasks if t.item_field is None]
+    assert [t.page_no for t in flat] == [1]
+    assert set(flat[0].fields) == {"contract_number", "issue_date", "amount_eur", "currency"}
+
+
+def test_field_anchors_fallback_to_name():
+    from pipeline.schema import Party, field_anchors
+
+    assert field_anchors(ContractStrict, "amount_eur")[0] == "importo"
+    assert field_anchors(ContractStrict, "amount_eur")[-1] == "amount eur"
+    assert field_anchors(Party, "vat_id") == ["vat id"]

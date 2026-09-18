@@ -55,15 +55,29 @@ class Party(BaseModel):
     vat_id: Extracted[str | None] = Field(default_factory=lambda: Extracted(value=None, quote=None))
 
 
+def anchors(*labels: str) -> Any:
+    """Etichette con cui il campo compare nel documento (es. "Importo"): la
+    Fase 5 le usa per trovare pagina e regioni del campo invece di mandare al
+    modello l'intero documento. Il nome del campo resta come ultimo tentativo."""
+    return Field(json_schema_extra={"anchors": list(labels)})
+
+
+def field_anchors(model: type[BaseModel], name: str) -> list[str]:
+    """Etichette di ancoraggio del campo, in ordine di priorità."""
+    extra = model.model_fields[name].json_schema_extra
+    labels = list(extra.get("anchors", [])) if isinstance(extra, dict) else []
+    return [*labels, name.replace("_", " ")]
+
+
 class ContractStrict(BaseModel):
     """SchemaStrict di esempio: contratto con campi piatti + lista parti."""
 
     model_config = ConfigDict(extra="forbid")
 
-    contract_number: Extracted[str]
-    issue_date: Extracted[str]  # formato YYYY-MM-DD validato a valle
-    amount_eur: Extracted[float]
-    currency: Extracted[Literal["EUR", "USD", "GBP"]]
+    contract_number: Extracted[str] = anchors("contratto n", "contract no")
+    issue_date: Extracted[str] = anchors("data emissione", "issue date")  # YYYY-MM-DD validato a valle
+    amount_eur: Extracted[float] = anchors("importo", "amount")
+    currency: Extracted[Literal["EUR", "USD", "GBP"]] = anchors("valuta", "currency")
     parties: list[Party]
 
     @model_validator(mode="after")
@@ -128,6 +142,7 @@ def loose(model: type[BaseModel]) -> type[BaseModel]:
 
 
 _CONSTRAINT_KEYS = {
+    "anchors",  # metadato per la Fase 5, non un vincolo per il decoder
     "pattern", "format", "minimum", "maximum", "exclusiveMinimum",
     "exclusiveMaximum", "multipleOf", "minLength", "maxLength",
 }
