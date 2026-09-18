@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import signal
 import subprocess
 import time
@@ -18,6 +19,24 @@ from pathlib import Path
 from .config import Settings, get_settings
 
 log = logging.getLogger(__name__)
+
+
+def _in_wsl() -> bool:
+    return "microsoft" in platform.uname().release.lower()
+
+
+def _vllm_env() -> dict[str, str]:
+    """Ambiente del processo `vllm serve`.
+
+    In WSL2 il V2 model runner fallisce con "UVA is not available" (niente
+    pinned memory) e il sampler FlashInfer con "Could not find nvcc" (c'è il
+    driver ma non il CUDA Toolkit). Si usano i default sicuri, ma un valore
+    già impostato dall'utente ha la precedenza."""
+    env = os.environ.copy()
+    if _in_wsl():
+        env.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+        env.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+    return env
 
 
 class VLLMRunner:
@@ -55,7 +74,7 @@ class VLLMRunner:
         lf = log_file.open("a", buffering=1)
         self.proc = subprocess.Popen(
             args, stdout=lf, stderr=subprocess.STDOUT,
-            preexec_fn=os.setsid,
+            preexec_fn=os.setsid, env=_vllm_env(),
         )
         url = f"http://127.0.0.1:{port}/v1"
         self._wait_ready(url, timeout=900)

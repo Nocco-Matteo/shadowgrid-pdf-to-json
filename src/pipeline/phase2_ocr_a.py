@@ -40,7 +40,7 @@ def run(
         log.info("OCR A già fatto: %s", doc_id)
         return
 
-    client = client or PaddleOCRVLClient(s.ocr_a_url)
+    client = client or PaddleOCRVLClient(s.ocr_a_url, s.model_a)
 
     for page in db.get_pages(doc_id):
         page_no = page["page_no"]

@@ -55,8 +55,12 @@ class PaddleOCRVLClient:
     """Wrapper su PaddleOCRVL con backend vllm-server. La pipeline è costruita
     una sola volta e cachata (l'init è costoso)."""
 
-    def __init__(self, url: str | None = None):
-        self.url = url or get_settings().ocr_a_url
+    def __init__(self, url: str | None = None, model: str | None = None):
+        s = get_settings()
+        self.url = url or s.ocr_a_url
+        # vLLM espone il modello col nome passato a `vllm serve` (model_a); il
+        # client Paddle di default chiede "PaddleOCR-VL-1.6-0.9B" -> 404.
+        self.model = model or s.model_a
         self._pipeline = None
 
     def _build(self):
@@ -67,6 +71,7 @@ class PaddleOCRVLClient:
                 pipeline_version="v1.6",
                 vl_rec_backend="vllm-server",
                 vl_rec_server_url=self.url,
+                vl_rec_api_model_name=self.model,
             )
         return self._pipeline
 
