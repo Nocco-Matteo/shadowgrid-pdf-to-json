@@ -68,3 +68,92 @@ def test_union_bbox():
 
 def test_expand_clamped():
     assert expand((5, 5, 10, 10), 100, 20, 20) == (0.0, 0.0, 20.0, 20.0)
+
+
+# ---------------------------------------------------------------------------
+# Ordine di lettura
+# ---------------------------------------------------------------------------
+
+from pipeline.geometry import reading_order  # noqa: E402
+
+
+def test_reading_order_single_column_unchanged():
+    boxes = [(0, 0, 100, 20), (0, 30, 100, 50), (0, 60, 100, 80)]
+    assert reading_order(boxes) == [0, 1, 2]
+
+
+def test_reading_order_fixes_vertical_inversion_in_column():
+    """Il caso che conta: due blocchi della STESSA colonna emessi al contrario."""
+    boxes = [(0, 0, 100, 20), (0, 60, 100, 80), (0, 30, 100, 50)]
+    assert reading_order(boxes) == [0, 2, 1]
+
+
+def test_reading_order_two_columns_not_interleaved():
+    """Colonna sinistra completa, poi destra: mai alternate."""
+    boxes = [
+        (0, 0, 100, 20), (0, 40, 100, 60),        # sinistra
+        (200, 0, 300, 20), (200, 40, 300, 60),    # destra
+    ]
+    assert reading_order(boxes) == [0, 1, 2, 3]
+
+
+def test_reading_order_keeps_engine_column_order():
+    """L'ordine FRA le colonne resta quello del motore: una regione isolata a
+    sinistra (numero di pagina, nota di margine) non scavalca il corpo."""
+    boxes = [
+        (200, 0, 300, 20),      # corpo, emesso per primo
+        (200, 40, 300, 60),
+        (0, 500, 40, 520),      # margine sinistro, emesso per ultimo
+    ]
+    assert reading_order(boxes) == [0, 1, 2]
+
+
+def test_reading_order_full_width_block_separates_sections():
+    """Un blocco a tutta larghezza chiude la sezione sopra e apre quella sotto."""
+    boxes = [
+        (0, 0, 100, 20), (200, 0, 300, 20),       # due colonne, fascia alta
+        (0, 40, 300, 60),                          # banda a tutta larghezza
+        (0, 80, 100, 100), (200, 80, 300, 100),    # due colonne, fascia bassa
+    ]
+    assert reading_order(boxes) == [0, 1, 2, 3, 4]
+
+
+def test_reading_order_footer_stays_last():
+    """Il piè di pagina cade nella colonna sinistra per posizione: senza
+    page_height finisce a metà pagina, con page_height resta in fondo."""
+    boxes = [
+        (0, 100, 100, 120),      # colonna sinistra
+        (200, 100, 300, 120),    # colonna destra
+        (0, 960, 120, 980),      # piè di pagina
+    ]
+    assert reading_order(boxes) == [0, 2, 1]
+    assert reading_order(boxes, page_height=1000) == [0, 1, 2]
+
+
+def test_reading_order_without_bbox_keeps_engine_order():
+    boxes = [(0, 60, 100, 80), None, (0, 0, 100, 20)]
+    assert reading_order(boxes) == [0, 1, 2]
+
+
+def test_reading_order_phb_page16_hill_vs_mountain_dwarf():
+    """Regressione dalla run reale sul Player's Handbook p.16.
+
+    PaddleOCR-VL ha emesso il titolo MOUNTAIN DWARF (y=1478) PRIMA del tratto
+    Dwarven Toughness (y=1308), che in pagina gli sta sopra e appartiene quindi
+    a HILL DWARF. La Fase 4 ha attribuito il tratto al titolo che lo precedeva
+    nel testo e l'export ne ha fatto `race_dwarf_mountain_dwarven_toughness`:
+    validato, confidence alta, e sbagliato (è un tratto Hill Dwarf).
+    """
+    # (id, bbox) come in DB, nell'ordine emesso dal motore
+    regions = [
+        (457, (1431, 934, 2380, 970)),    # HILL DWARF
+        (459, (1429, 985, 2380, 1190)),   # As a hill dwarf, ...
+        (460, (1431, 1215, 2380, 1250)),  # Ability Score Increase (Wis)
+        (461, (1434, 1478, 2380, 1514)),  # MOUNTAIN DWARF
+        (462, (1430, 1308, 2380, 1440)),  # Dwarven Toughness
+        (463, (1429, 1528, 2380, 1760)),  # As a mountain dwarf, ...
+    ]
+    order = [regions[i][0] for i in reading_order([b for _, b in regions],
+                                                  page_height=3300)]
+    assert order == [457, 459, 460, 462, 461, 463]
+    assert order.index(462) < order.index(461)  # Toughness sotto HILL DWARF

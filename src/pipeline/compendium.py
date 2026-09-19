@@ -110,11 +110,66 @@ def _errors(schema: dict[str, Any], value: Any) -> list[str]:
             for e in Draft202012Validator(schema).iter_errors(value)]
 
 
+# Vincoli "esattamente uno tra" che lo schema JSON documenta nelle description
+# ma non codifica: a runtime li applica il loader del compendium. Qui servono
+# perché un effetto che il loader rifiuterebbe non deve uscire dalla pipeline.
+# Senza, un `{"kind": "save_bonus", "condition": "always"}` senza amount passa
+# indenne — il cancello 6.2 controlla i numeri presenti, e lì non ce n'erano —
+# ed è esattamente quello che la prima run ha esportato su Dwarven Resilience.
+EXACTLY_ONE_OF: dict[str, tuple[str, ...]] = {
+    "speed_bonus": ("amount", "byLevel"),
+    "ac_bonus": ("amount", "fromAbilityModifier"),
+    "attack_bonus": ("amount", "byLevel"),
+    "save_bonus": ("amount", "fromAbilityModifier"),
+    "resource_cost": ("amount", "variableAmount"),
+}
+
+
+def _damage_types(path: str | Path = DEFAULT_SCHEMA_PATH) -> set[str]:
+    """I 13 damage type chiusi. Lo schema li definisce in `damageTypeClosed` ma
+    resistance/extra_damage_dice/spell_damage_bonus accettano ancora stringhe
+    libere, e la description di damageTypeClosed dice perché è un problema:
+    "una word scrapata non è un damage type". La prima run ha esportato
+    `damageTypes: ["associated with your draconic ancestry"]`."""
+    return set(load_schema(path)["$defs"]["damageTypeClosed"]["enum"])
+
+
+def _loader_errors(value: Any, where: str = "") -> list[str]:
+    """Regole che lo schema documenta ma non codifica e che a runtime applica
+    il loader del compendium. Ricorsivo: un envelope va controllato fino agli
+    effects annidati nelle definizioni."""
+    out: list[str] = []
+    if isinstance(value, dict):
+        keys = EXACTLY_ONE_OF.get(value.get("kind"))
+        if keys:
+            present = [k for k in keys if value.get(k) is not None]
+            if len(present) != 1:
+                got = ", ".join(present) if present else "nessuno dei due"
+                out.append(f"{where or '<root>'}: {value['kind']} richiede "
+                           f"esattamente uno tra {' e '.join(keys)} ({got})")
+        known = None
+        for key in ("damageType", "damageTypes"):
+            raw = value.get(key)
+            if raw is None:
+                continue
+            known = _damage_types() if known is None else known
+            for dt in ([raw] if isinstance(raw, str) else raw):
+                if isinstance(dt, str) and dt.lower() not in known:
+                    out.append(f"{where}/{key}: {dt!r} non è uno dei 13 damage "
+                               f"type; è prosa copiata dalla regola")
+        for k, v in value.items():
+            out.extend(_loader_errors(v, f"{where}/{k}" if where else k))
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            out.extend(_loader_errors(v, f"{where}[{i}]"))
+    return out
+
+
 def validate_def(value: Any, def_name: str, path: str | Path = DEFAULT_SCHEMA_PATH) -> list[str]:
     """Errori di validazione di ``value`` contro ``$defs/<def_name>`` (vuota = ok)."""
     root = load_schema(path)
     return _errors({"$schema": root.get("$schema"), "$defs": root["$defs"],
-                    "$ref": f"#/$defs/{def_name}"}, value)
+                    "$ref": f"#/$defs/{def_name}"}, value) + _loader_errors(value)
 
 
 def envelope_schema(seed_file: str, path: str | Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
@@ -128,7 +183,7 @@ def envelope_schema(seed_file: str, path: str | Path = DEFAULT_SCHEMA_PATH) -> d
 
 def validate_envelope(doc: dict[str, Any], seed_file: str,
                       path: str | Path = DEFAULT_SCHEMA_PATH) -> list[str]:
-    return _errors(envelope_schema(seed_file, path), doc)
+    return _errors(envelope_schema(seed_file, path), doc) + _loader_errors(doc)
 
 
 # ---------------------------------------------------------------------------

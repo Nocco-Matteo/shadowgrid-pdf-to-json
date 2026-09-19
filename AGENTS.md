@@ -18,6 +18,9 @@ Target (CUDA): scommenta vllm/paddlepaddle-gpu in `requirements.txt`, poi `pip i
 - End-to-end: `python -m pipeline.cli run <pdf>`
 - Solo fase: `python -m pipeline.cli <subcommand> <pdf>` (v. `cli.py`)
 - Valutazione gold: `python -m pipeline.cli eval`
+- Riestrazione senza rifare l'OCR: `python -m pipeline.cli reorder --doc-id <id>`
+  (riordina le regioni con `reading_order` e azzera l'estrazione), poi `run`:
+  i modelli OCR non vengono caricati se non c'è lavoro per loro.
 
 ## Note operative
 

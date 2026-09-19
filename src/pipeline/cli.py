@@ -224,40 +224,44 @@ def cmd_run(args) -> None:
     s = get_settings()
     db = DB(s)
     schema = _schema(args)
-    for p in args.paths:
-        doc_id = phase1_ingest.ingest(Path(p), db=db)
+    doc_ids = [phase1_ingest.ingest(Path(p), db=db) for p in args.paths]
+    for doc_id in doc_ids:
         phase1_ingest.rasterize(doc_id, db=db, degraded=args.degraded)
 
-    # OCR A
     runner = VLLMRunner(s)
-    s.ocr_a_url = runner.start(s.model_a, port=8080, phase="ocr_a")
-    try:
-        for p in args.paths:
-            doc_id = phase1_ingest.ingest(Path(p), db=db)
-            phase2_ocr_a.run(doc_id, db=db, settings=s)
-    finally:
-        runner.stop()
-
-    # OCR B + reconcile (opzionale)
-    if not args.skip_ocr_b:
-        s.ocr_b_url = runner.start(s.model_b, port=8080, phase="ocr_b")
+    # Caricare un modello OCR da ~3-4GB per poi saltare ogni pagina costa
+    # minuti di avvio per niente: si accende solo se c'è lavoro. È il caso
+    # della riestrazione su un documento già OCR-ato (v. `reorder`).
+    if any(db.get_status(d) in {"ingested", "rasterized"} for d in doc_ids):
+        s.ocr_a_url = runner.start(s.model_a, port=8080, phase="ocr_a")
         try:
-            for p in args.paths:
-                doc_id = phase1_ingest.ingest(Path(p), db=db)
-                phase3_ocr_b.run(doc_id, db=db, settings=s)
+            for doc_id in doc_ids:
+                phase2_ocr_a.run(doc_id, db=db, settings=s)
         finally:
             runner.stop()
     else:
+        log.info("OCR A già fatto su tutti i documenti: server non avviato")
+
+    # OCR B + reconcile (opzionale)
+    if not args.skip_ocr_b:
+        if any(db.get_status(d) == "ocr_a" for d in doc_ids):
+            s.ocr_b_url = runner.start(s.model_b, port=8080, phase="ocr_b")
+            try:
+                for doc_id in doc_ids:
+                    phase3_ocr_b.run(doc_id, db=db, settings=s)
+            finally:
+                runner.stop()
+        else:
+            log.info("OCR B già fatto su tutti i documenti: server non avviato")
+    else:
         # senza secondo OCR: ocr_a -> reconciled
-        for p in args.paths:
-            doc_id = phase1_ingest.ingest(Path(p), db=db)
+        for doc_id in doc_ids:
             if db.get_status(doc_id) == "ocr_a":
                 db.transition(doc_id, "ocr_a", "reconciled")
 
     # Enumerate + Extract + Validate (stesso modello: un solo avvio del server).
     # La validazione avviene con il server ancora attivo: i retry di Fase 6
     # rilanciano l'estrattore via HTTP.
-    doc_ids = [phase1_ingest.ingest(Path(p), db=db) for p in args.paths]
     doc_ids = [d for d in doc_ids if _same_schema(d, schema, db)]
     if not doc_ids:
         return
@@ -273,6 +277,23 @@ def cmd_run(args) -> None:
 
     for doc_id in doc_ids:
         export_doc(doc_id, schema, db, s, args.sources or s.source_codes)
+
+
+def cmd_reorder(args) -> None:
+    """Riapplica l'ordine di lettura alle regioni già in DB (niente GPU)."""
+    db = DB()
+    for doc_id in _resolve_doc_ids(args, db):
+        n = phase2_ocr_a.reorder(doc_id, db=db)
+        if n and not args.keep_extraction:
+            db.reset_extraction(doc_id)
+            log.info("%s: %d pagine riordinate, estrazione azzerata "
+                     "(stato reconciled): rifare da `enumerate`", doc_id, n)
+        elif n:
+            log.warning("%s: %d pagine riordinate ma estrazione CONSERVATA: "
+                        "le citazioni e le sezioni si riferiscono al testo vecchio",
+                        doc_id, n)
+        else:
+            log.info("%s: ordine già corretto, niente da fare", doc_id)
 
 
 def cmd_reset_extraction(args) -> None:
@@ -362,6 +383,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--source", dest="sources", action="append",
                     help="codice del libro per l'export (es. players_handbook), ripetibile")
     sp.set_defaults(func=cmd_run)
+
+    sp = sub.add_parser(
+        "reorder",
+        help="riapplica l'ordine di lettura alle regioni già in DB (niente OCR) "
+             "e azzera l'estrazione")
+    add_targets(sp)
+    sp.add_argument("--keep-extraction", action="store_true",
+                    help="non azzerare l'estrazione (sconsigliato: il testo cambia "
+                         "sotto le citazioni già validate)")
+    sp.set_defaults(func=cmd_reorder)
 
     sp = sub.add_parser("reset-extraction",
                         help="cancella estrazioni/task e torna a reconciled (OCR conservato)")

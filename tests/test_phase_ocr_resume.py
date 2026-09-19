@@ -274,3 +274,36 @@ def test_interrupted_majority_repaired_on_resume(env):
     # la risoluzione persistita è stata riapplicata al testo canonico
     assert db.get_page_text("d", 1) == "Importo: 100 EUR"
     assert db.get_canonical_regions("d", 1)[0]["text"] == "Importo: 100 EUR"
+
+
+# ---------------------------------------------------------------------------
+# reorder: riapplica l'ordine di lettura senza rifare l'OCR
+# ---------------------------------------------------------------------------
+
+
+def test_reorder_fixes_order_and_rebuilds_page_text(tmp_path):
+    """Le bbox sono già in DB: cambiare reading_order non deve costare un
+    nuovo OCR. Riordina le regioni e ricostruisce full_text/canonical_text."""
+    from pipeline.config import Settings
+    from pipeline.db import DB
+    from pipeline.phase2_ocr_a import reorder
+
+    s = Settings(db_path=tmp_path / "t.db", work_dir=tmp_path / "w")
+    s.work_dir.mkdir(parents=True, exist_ok=True)
+    db = DB(s)
+    db.upsert_document("doc_r", "/r.pdf", "sha_r", 1)
+    db.set_page("doc_r", 1, full_text="sbagliato", image_path=None)
+    # il motore emette il titolo della seconda sezione PRIMA del paragrafo che
+    # in pagina lo precede: è il caso Hill/Mountain Dwarf
+    db.add_region("doc_r", 1, (0, 0, 100, 20), "text", "TITOLO A", "a", 0)
+    db.add_region("doc_r", 1, (0, 200, 100, 220), "text", "TITOLO B", "a", 1)
+    db.add_region("doc_r", 1, (0, 100, 100, 120), "text", "paragrafo di A", "a", 2)
+
+    assert reorder("doc_r", db=db) == 1
+    rows = db.get_regions("doc_r", 1, engine="a")
+    assert [r["text"] for r in rows] == ["TITOLO A", "paragrafo di A", "TITOLO B"]
+    assert [r["order_idx"] for r in rows] == [0, 1, 2]
+    assert db.get_page_text("doc_r", 1) == "TITOLO A\nparagrafo di A\nTITOLO B"
+    # idempotente: alla seconda passata non c'è più niente da cambiare
+    assert reorder("doc_r", db=db) == 0
+    db.close()

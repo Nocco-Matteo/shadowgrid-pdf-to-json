@@ -135,6 +135,35 @@ def _check_item(db: DB, doc_id: str, it: dict, window_pages: list[int]) -> ListI
                     section=section, section_page=section_page)
 
 
+def _already_taken(item: ListItem, kept: dict[int, list[tuple[str, tuple]]]) -> bool:
+    """L'elemento è già stato preso? Confronto su anchor E regioni.
+
+    L'anchor è "la stringa verbatim che identifica l'inizio dell'elemento": il
+    modello a volte la tronca al nome del tratto ("Speed.") e a volte ci mette
+    la frase intera ("Speed. Your base walking speed is 30 feet."). Due anchor
+    di cui una è prefisso dell'altra sono lo stesso elemento — nella prima run
+    Half-Elf/Speed è entrato due volte esattamente così.
+
+    Ma l'anchor da sola non basta a decidere: se puntano a REGIONI DIVERSE sono
+    due elementi distinti, perché lo stesso tratto si ripete legittimamente per
+    due razze che condividono la pagina, con lo stesso identico nome. La
+    deduplica per sola anchor+pagina ne buttava via uno in silenzio.
+
+    Quando almeno una delle due non ha regioni proprie non c'è modo di
+    distinguerle e si dedùplica: è il caso delle finestre sovrapposte, dove lo
+    stesso elemento può tornare una volta con i region_ids e una senza.
+    """
+    anchor = normalize(item.anchor)
+    ids = tuple(sorted(item.region_ids))
+    for prev_anchor, prev_ids in kept.get(item.page, ()):
+        if not (anchor.startswith(prev_anchor) or prev_anchor.startswith(anchor)):
+            continue
+        if ids == prev_ids or not ids or not prev_ids:
+            return True
+    kept.setdefault(item.page, []).append((anchor, ids))
+    return False
+
+
 def run(
     doc_id: str,
     list_field_path: str,
@@ -219,7 +248,7 @@ def run(
 
     # Verifica anchor contro testo OCR (fuzzy partial_ratio >= 90)
     items: list[ListItem] = []
-    seen: set[tuple[str, int]] = set()
+    kept: dict[int, list[tuple[str, tuple]]] = {}  # pagina -> (anchor, region_ids)
     failed_windows = 0
     for w, (page_nos, context) in enumerate(windows, start=1):
         task = f"enumerate:{list_field_path}:pagine {page_nos[0]}-{page_nos[-1]}"
@@ -239,10 +268,10 @@ def run(
             item = _check_item(db, doc_id, it, page_nos)
             if item is None:
                 continue
-            key = (normalize(item.anchor), item.page)
-            if key in seen:
-                continue  # deduplica (anche tra finestre sovrapposte)
-            seen.add(key)
+            if _already_taken(item, kept):  # anche tra finestre sovrapposte
+                log.info("Elemento %r già enumerato (stesse regioni) -> scartato",
+                         item.anchor)
+                continue
             items.append(item)
         if len(windows) > 1:
             log.info("Enumerate %s: finestra %d/%d (pagine %d-%d): %d elementi",

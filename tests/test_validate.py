@@ -413,3 +413,46 @@ def test_retry_list_item_reads_single_element_response(tmp_path):
     assert row["attempt"] == 2 and row["status"] == "validated"
     assert row["page_no"] == 1
     assert schemas and schemas[0]["properties"]["parties"]["maxItems"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 6.2 — derivazione dichiarata dallo schema (velocità)
+# ---------------------------------------------------------------------------
+
+
+def test_gate_accepts_speed_derived_from_quote():
+    """Lo schema CHIEDE speed_bonus.amount come differenza da 30 feet; il
+    cancello deve riconoscere la derivazione, non punire l'obbedienza.
+
+    Nella prima run reale sul Player's Handbook questi quattro casi sono usciti
+    tutti `rejected` con citazione perfetta: il 59% degli elementi enumerati era
+    un tratto di velocità, quindi strutturalmente impossibile da validare.
+    """
+    assert gate_value_quote([{"kind": "speed_bonus", "amount": 5}],
+                            "Your base walking speed increases to 35 feet.")
+    assert gate_value_quote([{"kind": "speed_bonus", "amount": -5}],
+                            "Your base walking speed is 25 feet.")
+    assert gate_value_quote(
+        [{"kind": "speed_bonus", "amount": -5, "condition": "wearing_heavy_armor"}],
+        "Your base walking speed is 25 feet. Your speed is not reduced by wearing heavy armor.")
+    # forma già assoluta nel testo: accettata anche senza derivare
+    assert gate_value_quote([{"kind": "speed_bonus", "amount": 10}],
+                            "Your speed increases by 10 feet.")
+
+
+def test_gate_still_rejects_wrong_speed():
+    """La derivazione non è un lasciapassare: il segno sbagliato resta un errore."""
+    assert not gate_value_quote([{"kind": "speed_bonus", "amount": 5}],
+                                "Your base walking speed is 25 feet.")
+    assert not gate_value_quote([{"kind": "speed_bonus", "amount": -10}],
+                                "Your base walking speed is 25 feet.")
+
+
+def test_gate_derivation_is_only_for_speed():
+    """Nessun altro kind gode della derivazione: un numero inventato resta tale."""
+    quote = "Your hit point maximum increases by 1, and it increases by 1 every time you gain a level."
+    assert gate_value_quote([{"kind": "hp_bonus_per_level", "amount": 1}], quote)
+    assert not gate_value_quote([{"kind": "hp_bonus_per_level", "amount": 2}], quote)
+    # 31 = 30 + 1 non testimonia nulla se il kind non è speed_bonus
+    assert not gate_value_quote([{"kind": "ac_bonus", "amount": 1}],
+                                "Your armor class becomes 31.")

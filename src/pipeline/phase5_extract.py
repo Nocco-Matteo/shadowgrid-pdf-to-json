@@ -258,7 +258,12 @@ def build_prompt(task: Task) -> str:
     lines.append("- quote DEVE essere copiata carattere per carattere dal testo fornito sopra.")
     lines.append("- null è la risposta corretta quando il dato non è presente: "
                  "restituisci value=null E quote=null in quel caso.")
-    lines.append("- confidence: 'high' se la quote è nitida, 'low' se ambigua.")
+    lines.append(
+        "- confidence riguarda l'INFERENZA, non la leggibilità: 'high' solo se il "
+        "valore si legge nella quote senza interpretare. Usa 'low' se hai dedotto, "
+        "convertito o normalizzato il valore, se la quote lo sostiene solo in parte, "
+        "se la regola ha eccezioni o rimanda a un'altra sezione, o se un'altra "
+        "lettura era difendibile.")
     return "\n".join(lines)
 
 

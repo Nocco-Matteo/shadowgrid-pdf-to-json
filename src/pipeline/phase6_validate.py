@@ -35,7 +35,7 @@ from rapidfuzz.fuzz import partial_ratio
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
-from .schema import _is_extracted_model, _list_inner_type, guided_schema
+from .schema import BASE_WALKING_SPEED, _is_extracted_model, _list_inner_type, guided_schema
 from .text_norm import normalize
 
 log = logging.getLogger(__name__)
@@ -155,6 +155,33 @@ def _numbers_in(value: Any) -> list[float]:
     return []
 
 
+def _expected_numbers(value: Any) -> list[set[float]]:
+    """Per ogni numero della struttura, i valori che possono testimoniarlo nella
+    citazione. Di norma solo il numero stesso.
+
+    Eccezione: le derivazioni che lo schema CHIEDE esplicitamente al modello.
+    `speed_bonus.amount` è per contratto la differenza da BASE_WALKING_SPEED
+    ("35 feet" -> 5), quindi pretendere di trovare "5" nella citazione
+    boccerebbe per forza ogni tratto di velocità: il cancello rifiuterebbe il
+    modello per averlo obbedito. Qui si accetta la differenza O il valore
+    assoluto, che restano entrambi ancorati alla citazione — non è un
+    allentamento, è la stessa verifica applicata alla forma giusta.
+    """
+    if isinstance(value, dict):
+        out: list[set[float]] = []
+        derived = value.get("kind") == "speed_bonus"
+        for k, v in value.items():
+            if (derived and k == "amount"
+                    and isinstance(v, (int, float)) and not isinstance(v, bool)):
+                out.append({float(v), float(v) + BASE_WALKING_SPEED})
+            else:
+                out.extend(_expected_numbers(v))
+        return out
+    if isinstance(value, list):
+        return [c for v in value for c in _expected_numbers(v)]
+    return [{n} for n in _numbers_in(value)]
+
+
 def gate_value_quote(value: Any, quote: str) -> bool:
     """Il valore deve essere derivabile dalla citazione. Controlli CONSERVATIVI:
 
@@ -177,7 +204,8 @@ def gate_value_quote(value: Any, quote: str) -> bool:
     # derivato e finisce in revisione umana, non passa in silenzio).
     if isinstance(value, (list, dict)):
         q_nums = _signed_numbers(quote)
-        return all(any(abs(nv - n) < 1e-6 for nv in q_nums) for n in _numbers_in(value))
+        return all(any(abs(nv - n) < 1e-6 for nv in q_nums for n in cand)
+                   for cand in _expected_numbers(value))
     # numeri / date
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:

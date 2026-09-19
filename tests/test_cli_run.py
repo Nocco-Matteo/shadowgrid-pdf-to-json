@@ -187,3 +187,28 @@ def test_cli_run_refuses_mixed_schema_until_reset(pipeline_env, caplog):
     cli.main(["run", str(pdf), "--source", "players_handbook"])
     envelope, _ = _export(tmp_path)
     assert len(envelope["definitions"]) == 2
+
+
+def test_cli_run_skips_ocr_servers_when_already_ocred(pipeline_env, monkeypatch):
+    """Riestrazione su un documento già OCR-ato: i modelli OCR non si caricano.
+
+    Sono ~3-4GB ciascuno e ogni pagina verrebbe comunque saltata: minuti di
+    avvio per niente. È il giro che si fa dopo `reorder`, o cambiando schema."""
+    tmp_path, pdf = pipeline_env
+    assert cli.main(["run", str(pdf), "--source", "players_handbook"]) == 0
+
+    started: list[str] = []
+    monkeypatch.setattr(VLLMRunner, "start",
+                        lambda self, model, **k: started.append(model) or "http://stub/v1")
+    from pipeline.db import DB
+    db = DB()
+    doc_id = next(iter(r["doc_id"] for r in db.conn.execute(
+        "SELECT doc_id FROM documents")))
+    db.reset_extraction(doc_id)
+    db.close()
+
+    assert cli.main(["run", str(pdf), "--source", "players_handbook"]) == 0
+    assert started == []  # nessun modello OCR caricato
+    envelope, _ = _export(tmp_path)
+    assert {d["id"] for d in envelope["definitions"]} == {
+        "race_dwarf_dwarven_resilience", "race_dwarf_hill_dwarven_toughness"}

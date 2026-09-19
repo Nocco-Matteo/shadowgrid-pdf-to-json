@@ -99,6 +99,13 @@ def compendium(def_name: str, description: str) -> Any:
     return Field(description=description, json_schema_extra={"compendium": def_name})
 
 
+# Velocità base di un personaggio, in piedi. Lo schema chiede
+# speed_bonus.amount come differenza da qui, e il cancello 6.2 usa la STESSA
+# costante per riconoscere la derivazione nella citazione: finché la fonte è
+# una sola le due cose non possono divergere (v. phase6_validate).
+BASE_WALKING_SPEED = 30
+
+
 class RaceTrait(BaseModel):
     """Un tratto razziale che cambia un numero del personaggio (raceTraits.json)."""
 
@@ -121,7 +128,8 @@ class RaceTrait(BaseModel):
         "effetti numerici del tratto nella tassonomia chiusa del compendium "
         "(resistance, ac_bonus, ac_formula, speed_bonus, hp_bonus_per_level, ...). "
         "Solo ciò che cambia un numero del personaggio; quote = la frase della regola. "
-        "Velocità: speed_bonus.amount è la differenza da 30 feet ('35 feet' -> 5). "
+        f"Velocità: speed_bonus.amount è la differenza da {BASE_WALKING_SPEED} feet "
+        f"('35 feet' -> 5, '25 feet' -> -5). "
         "Se il tratto non cambia nessun numero: value=null e quote=null"))
 
     @model_validator(mode="after")
@@ -145,8 +153,13 @@ class RaceTraitsDoc(BaseModel):
         "tratti razziali: paragrafi che iniziano con il nome del tratto in grassetto "
         "(es. 'Dwarven Resilience.') nelle sezioni '<Razza> Traits' di razze e "
         "sottorazze. SOLO tratti che cambiano un numero del personaggio: resistenze o "
-        "immunità ai danni, classe armatura, velocità, punti ferita. anchor = il nome "
-        "del tratto; section = il titolo della razza o sottorazza a cui appartiene"))
+        "immunità ai danni, classe armatura, velocità, punti ferita. ESCLUSI gli "
+        "aumenti di caratteristica ('Ability Score Increase'): non sono tratti, il "
+        "compendium li tiene in un seed separato (raceAsi.json) e li cura a mano. "
+        "Esclusi anche i tratti che danno solo vantaggio o competenza senza un "
+        "numero, e le voci descrittive (Age, Alignment, Size, Languages, Names). "
+        "anchor = il nome del tratto; section = il titolo della razza o sottorazza "
+        "a cui appartiene"))
 
 
 # Schemi selezionabili dalla CLI (--schema)
@@ -278,9 +291,9 @@ def guided_schema(
     e la validazione strict finale fallisce. Rispetto a ``loose`` obbliga il
     modello a rispondere a ogni campo richiesto:
     - la radice contiene solo ``fields`` (default: tutti), tutti required;
-    - ogni campo foglia è l'oggetto Extracted (non null) con value e quote
-      required: l'assenza si dichiara con value=null e quote=null, non
-      omettendo la chiave (che in Fase 5 è un task fallito);
+    - ogni campo foglia è l'oggetto Extracted (non null) con value, quote e
+      confidence required: l'assenza si dichiara con value=null e quote=null,
+      non omettendo la chiave (che in Fase 5 è un task fallito);
     - ``single_item``: le liste hanno esattamente un elemento (task per
       singolo elemento di lista)."""
     schema = model.model_json_schema()
@@ -306,7 +319,12 @@ def guided_schema(
         if str(d.get("title", "")).startswith("Extracted"):
             for prop in d.get("properties", {}).values():
                 prop.pop("default", None)
-            d["required"] = ["value", "quote"]
+            # confidence obbligatoria: se il modello la omette vale il default
+            # "high", cioè il valore più rassicurante scelto da nessuno. Nella
+            # prima run TUTTE e 153 le estrazioni sono uscite 'high', il che
+            # rende il tasso di errore silenzioso (valore sbagliato + confidence
+            # alta) identico al tasso di errore, e la metrica inutile.
+            d["required"] = ["value", "quote", "confidence"]
         else:
             tighten(d)
     if fields is not None:

@@ -98,3 +98,31 @@ def test_enumerate_recoverable_from_needs_review(db):
     items = run("doc_a", "parties", db=db, client=client, expected_count=1)
     assert len(items) == 1
     assert db.get_status("doc_a") == "enumerated"
+
+
+def test_enumerate_dedup_same_region_different_anchor_length(db):
+    """Nella prima run Half-Elf/Speed è entrato due volte: stessa pagina, stessa
+    regione, ma anchor "Speed." e "Speed. Your base walking speed is 30 feet.".
+    La deduplica per sola anchor non poteva vederlo."""
+    db.add_region("doc_a", 1, (0, 0, 10, 10), "text",
+                  "Contratto n. 44/B del 2024", "a", 0)
+    client = StubExtractor({"items": [
+        {"anchor": "Contratto n. 44/B del 2024", "page": 1, "region_ids": [1]},
+        {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": [1]},
+    ]})
+    items = run("doc_a", "parties", db=db, client=client)
+    assert len(items) == 1
+    assert items[0].anchor == "Contratto n. 44/B del 2024"  # vince il primo
+
+
+def test_enumerate_keeps_same_anchor_on_different_regions(db):
+    """Lo stesso tratto ripetuto per due sottorazze sono DUE elementi: la
+    deduplica per regione non deve mangiarne uno."""
+    db.add_region("doc_a", 1, (0, 0, 10, 10), "text", "Contratto n. 44/B", "a", 0)
+    db.add_region("doc_a", 1, (0, 20, 10, 30), "text", "Contratto n. 44/B", "a", 1)
+    client = StubExtractor({"items": [
+        {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": [1]},
+        {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": [2]},
+    ]})
+    items = run("doc_a", "parties", db=db, client=client)
+    assert len(items) == 2

@@ -66,11 +66,27 @@ def test_parse_result_object_with_json():
     assert r0.region_type == "text"  # title -> text
     assert r0.text == "CONTRATTO N. 44/B"
     assert r0.order_idx == 0
-    table = regions[2]
-    assert table.region_type == "table"
-    assert "<table>" in table.text  # HTML conservato
-    assert regions[3].region_type == "formula"
-    assert regions[4].region_type == "stamp"
+    # le regioni escono in ordine di lettura, non di emissione: si cercano
+    # per contenuto, non per indice (v. test_reading_order_* in test_geometry)
+    by_type = {r.region_type: r for r in regions}
+    assert "<table>" in by_type["table"].text  # HTML conservato
+    assert by_type["formula"].text == "E = mc^2"
+    assert by_type["stamp"].text == "TIMBRO"
+
+
+def test_parse_orders_regions_and_renumbers():
+    """L'adapter normalizza l'ordine di lettura e rinumera order_idx: il
+    riquadro a destra in alto (il timbro) appartiene alla fascia superiore e
+    precede la tabella a tutta larghezza, che la chiude."""
+    regions = _parse_paddle_result(_VOResult(_page(BLOCKS)), page_no=1)
+    assert [r.text for r in regions] == [
+        "CONTRATTO N. 44/B",
+        "Data emissione: 2024-03-15",
+        "TIMBRO",
+        "<table><tr><td>Parte</td><td>Ruolo</td></tr></table>",
+        "E = mc^2",
+    ]
+    assert [r.order_idx for r in regions] == [0, 1, 2, 3, 4]
 
 
 def test_parse_result_object_with_json_res_wrapper():
@@ -143,6 +159,7 @@ def test_legacy_list_format_still_works():
         {"bbox": [1, 2, 3, 4], "type": "text", "text": "ciao"},
         {"bbox": None, "type": "table", "text": None, "table": {"rows": 2}},
     ]
+    # bbox mancante su una regione: reading_order lascia l'ordine del motore
     regions = _parse_paddle_result(legacy, page_no=7)
     assert len(regions) == 2
     assert regions[0].text == "ciao"

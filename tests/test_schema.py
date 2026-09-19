@@ -89,7 +89,9 @@ def test_guided_schema_flat_task_requires_only_its_fields():
     # il campo foglia è l'oggetto Extracted, non null
     assert g["properties"]["contract_number"] == {"$ref": "#/$defs/Extracted_str_"}
     leaf = g["$defs"]["Extracted_str_"]
-    assert leaf["required"] == ["value", "quote"]
+    # confidence obbligatoria: omessa varrebbe il default "high", cioè la
+    # risposta più rassicurante senza che nessuno l'abbia scelta
+    assert leaf["required"] == ["value", "quote", "confidence"]
     assert all("default" not in p for p in leaf["properties"].values())
 
 
@@ -124,10 +126,14 @@ def test_guided_schema_accepts_declared_absence_and_rejects_omission():
 
     g = guided_schema(ContractStrict, ["parties"], single_item=True)
     leaf = {"value": "x", "quote": "x", "page": 1, "bbox": None, "confidence": "high"}
-    absent = {"value": None, "quote": None}
+    absent = {"value": None, "quote": None, "confidence": "high"}
     jsonschema.validate({"parties": [{"name": leaf, "role": leaf, "vat_id": absent}]}, g)
     with pytest.raises(jsonschema.ValidationError):  # vat_id omesso
         jsonschema.validate({"parties": [{"name": leaf, "role": leaf}]}, g)
+    with pytest.raises(jsonschema.ValidationError):  # confidence omessa
+        jsonschema.validate(
+            {"parties": [{"name": leaf, "role": leaf,
+                          "vat_id": {"value": None, "quote": None}}]}, g)
     with pytest.raises(jsonschema.ValidationError):  # campo intero a null
         jsonschema.validate({"parties": [{"name": None, "role": leaf, "vat_id": absent}]}, g)
 

@@ -273,6 +273,29 @@ class DB:
                 (doc_id, page_no, engine),
             )
 
+    def set_region_order(self, doc_id: str, region_ids: list[int]) -> None:
+        """Riscrive order_idx delle regioni nell'ordine dato (0..n-1)."""
+        with self.tx() as cur:
+            for idx, rid in enumerate(region_ids):
+                cur.execute(
+                    "UPDATE regions SET order_idx=? WHERE region_id=? AND doc_id=?",
+                    (idx, rid, doc_id),
+                )
+
+    def rebuild_page_full_text(self, doc_id: str, page_no: int) -> None:
+        """Ricostruisce pages.full_text dalle regioni A grezze (come Fase 2)."""
+        rows = self.conn.execute(
+            "SELECT text FROM regions WHERE doc_id=? AND page_no=? AND engine='a' "
+            "ORDER BY order_idx", (doc_id, page_no),
+        ).fetchall()
+        with self.tx() as cur:
+            cur.execute(
+                """INSERT INTO pages(doc_id, page_no, full_text) VALUES(?,?,?)
+                   ON CONFLICT(doc_id, page_no) DO UPDATE SET
+                     full_text=excluded.full_text""",
+                (doc_id, page_no, "\n".join(r["text"] for r in rows)),
+            )
+
     def get_regions(self, doc_id: str, page_no: int, engine: str | None = None) -> list[sqlite3.Row]:
         if engine:
             return self.conn.execute(

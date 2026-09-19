@@ -57,3 +57,54 @@ def test_export_roundtrip_reuses_seed_ids():
     assert c.validate_envelope(envelope, "raceTraits.json") == []
     assert [d["id"] for d in envelope["definitions"]] == [d["id"] for d in SEED["definitions"]]
     assert notes == []
+
+
+# ---------------------------------------------------------------------------
+# Regole del loader: documentate nelle description, non codificate nello schema
+# ---------------------------------------------------------------------------
+
+
+def test_effect_needs_exactly_one_of_amount_or_alternative():
+    """`{"kind": "save_bonus", "condition": "always"}` senza amount è uscito
+    validato dalla prima run ed è finito nell'export di Dwarven Resilience: il
+    cancello 6.2 verifica i numeri presenti, e lì non ce n'erano. Un effetto
+    che il loader del compendium rifiuterebbe non deve uscire dalla pipeline."""
+    assert c.validate_def({"kind": "save_bonus", "condition": "always"}, "featureEffect")
+    assert c.validate_def({"kind": "save_bonus", "amount": 2,
+                           "fromAbilityModifier": "con"}, "featureEffect")
+    assert c.validate_def({"kind": "save_bonus", "amount": 2}, "featureEffect") == []
+    assert c.validate_def({"kind": "save_bonus", "fromAbilityModifier": "con"},
+                          "featureEffect") == []
+    # amount 0 è un valore, non un'assenza: il vincolo è soddisfatto
+    assert c.validate_def({"kind": "speed_bonus", "amount": 0}, "featureEffect") == []
+
+
+def test_damage_type_must_be_one_of_the_closed_set():
+    """La prima run ha esportato `damageTypes: ['associated with your draconic
+    ancestry']`: prosa della regola in un campo valore. Lo schema definisce
+    damageTypeClosed ma resistance accetta ancora stringhe libere."""
+    assert c.validate_def(
+        {"kind": "resistance", "damageTypes": ["associated with your draconic ancestry"]},
+        "featureEffect")
+    assert c.validate_def({"kind": "resistance", "damageTypes": ["fire"]},
+                          "featureEffect") == []
+    assert c.validate_def({"kind": "resistance", "damageTypes": ["Poison"]},
+                          "featureEffect") == []
+    assert c.validate_def({"kind": "resistance", "damageTypes": ["fire", "the"]},
+                          "featureEffect")
+
+
+def test_loader_rules_reach_nested_effects_of_an_envelope():
+    """Un envelope va controllato fino agli effects annidati, non solo in cima."""
+    bad = {"version": 1, "definitions": [{
+        "id": "race_x_y", "raceName": "X", "featureName": "Y", "grantedAtLevel": 1,
+        "sources": ["players_handbook"],
+        "effects": [{"kind": "resistance", "damageTypes": ["whatever the text says"]}],
+    }]}
+    errors = c.validate_envelope(bad, "raceTraits.json")
+    assert any("damage" in e for e in errors)
+
+
+def test_curated_seed_still_passes_the_loader_rules():
+    """Le regole nuove non devono bocciare il seed curato a mano."""
+    assert c.validate_envelope(SEED, "raceTraits.json") == []

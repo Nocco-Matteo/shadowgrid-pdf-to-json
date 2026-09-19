@@ -29,6 +29,11 @@ python -m pipeline.cli ingest path/to/doc.pdf
 python -m pipeline.cli run path/to/doc.pdf --source players_handbook   # end-to-end + export
 python -m pipeline.cli export --doc-id <doc_id> --source players_handbook
 python -m pipeline.cli eval                    # valutazione sul gold set
+
+# manutenzione: riapplica l'ordine di lettura alle regioni già in DB (niente
+# GPU) e azzera l'estrazione; poi `run` rifà solo Fase 4-6, senza ricaricare
+# i modelli OCR. Serve dopo un cambio di geometry.reading_order.
+python -m pipeline.cli reorder --doc-id <doc_id>
 ```
 
 Lo schema di default è `race_traits`: estrae i tratti razziali che cambiano un

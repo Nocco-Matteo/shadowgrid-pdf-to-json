@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import get_settings
-from .geometry import BBox
+from .geometry import BBox, reading_order
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +45,17 @@ class Region:
     text: str
     order_idx: int
     region_id: int | None = None  # id DB, se la regione viene dal DB
+
+
+def _in_reading_order(regions: list[Region], page_height: float | None) -> list[Region]:
+    """Riordina le regioni di una pagina in ordine di lettura e rinumera
+    order_idx. I motori emettono i blocchi nel loro ordine interno, che su un
+    impaginato a colonne non è quello di lettura: v. geometry.reading_order."""
+    order = reading_order([r.bbox for r in regions], page_height)
+    out = [regions[i] for i in order]
+    for idx, r in enumerate(out):
+        r.order_idx = idx
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -78,13 +89,15 @@ class PaddleOCRVLClient:
 
     def ocr_page(self, image_path: str | Path, page_no: int) -> list[Region]:
         result = self._build().predict(str(image_path))
-        regions = _parse_paddle_result(result, page_no)
+        regions = _parse_paddle_result(result, page_no, _image_height(image_path))
         if not regions:
             log.info("OCR A pagina %d: nessuna regione (pagina vuota)", page_no)
         return regions
 
 
-def _parse_paddle_result(result: Any, page_no: int) -> list[Region]:
+def _parse_paddle_result(
+    result: Any, page_no: int, page_height: float | None = None
+) -> list[Region]:
     """Adapter per il formato documentato di PaddleOCR-VL (pipeline_version 1.6).
 
     `predict()` restituisce un iteratore di risultati, uno per pagina; ogni
@@ -114,7 +127,7 @@ def _parse_paddle_result(result: Any, page_no: int) -> list[Region]:
             raise OCRParseError(f"parsing_res_list non è una lista: {type(blocks)!r}")
         for i, block in enumerate(blocks):
             regions.append(_paddle_block_to_region(block, page_no, len(regions) + i))
-    return regions
+    return _in_reading_order(regions, page_height)
 
 
 def _paddle_page_payloads(result: Any) -> list[dict]:
@@ -183,6 +196,19 @@ _LABEL_MAP = {
     "stamp": "stamp",
     "seal": "stamp",
 }
+
+
+def _image_height(image_path: str | Path) -> float | None:
+    """Altezza in pixel dell'immagine di pagina; None se illeggibile (senza,
+    reading_order non distingue gli elementi di servizio nei margini)."""
+    try:
+        from PIL import Image  # import lazy
+
+        with Image.open(image_path) as im:
+            return float(im.size[1])
+    except Exception as e:
+        log.debug("Altezza pagina non determinata per %s: %s", image_path, e)
+        return None
 
 
 def _map_label(label: Any) -> str:
@@ -271,7 +297,7 @@ def _parse_deepseek_grounding(content: str, page_no: int, img_w: int, img_h: int
         rtype = _DEEPSEEK_LABEL_MAP.get(label) or _map_label(label)
         regions.append(Region(page_no=page_no, bbox=bbox, region_type=rtype,
                               text=text, order_idx=len(regions)))
-    return regions
+    return _in_reading_order(regions, float(img_h))
 
 
 class DeepSeekOCRClient:
