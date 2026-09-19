@@ -257,25 +257,41 @@ def compare_runs(db: DB, run_a: int, run_b: int) -> dict:
     deltas = {}
     for fp in sorted(set(fa) | set(fb)):
         a, b = fa.get(fp, {}), fb.get(fp, {})
-        deltas[fp] = {
+        d = {
             "precision": (b.get("precision", 0) - a.get("precision", 0)),
             "recall": (b.get("recall", 0) - a.get("recall", 0)),
             "exact_match": (b.get("exact_match", 0) - a.get("exact_match", 0)),
             "silent_errors": (b.get("silent_errors", 0) - a.get("silent_errors", 0)),
         }
+        if any(d.values()):  # un campo che non è cambiato non è una notizia
+            deltas[fp] = d
     return {
         "delta_fields": deltas,
         "silent_error_rate": (mb.get("silent_error_rate", 0) - ma.get("silent_error_rate", 0)),
     }
 
 
-def print_metrics(m: RunMetrics) -> None:
+def print_metrics(m: RunMetrics, all_fields: bool = False) -> None:
+    """Riassunto prima, dettaglio dopo, e di default SOLO i campi sbagliati.
+
+    Su un manuale i campi sono centinaia: stampare la riga di ognuno seppellisce
+    i tre numeri che contano sotto una tabella che nessuno legge."""
+    shown = m.fields if all_fields else [
+        f for f in m.fields if f.exact_match < 1.0 or f.silent_errors]
+    evaluated = [f for f in m.fields if f.n]
+    exact = sum(1 for f in evaluated if f.exact_match >= 1.0)
     print(f"=== Run {m.run_id} ===")
-    print(f"{'field':40} {'prec':>6} {'rec':>6} {'em':>6} {'n':>4} {'silent':>6}")
-    for f in m.fields:
+    print(f"campi valutati: {len(evaluated)}   esatti: {exact}   "
+          f"sbagliati: {len(evaluated) - exact}")
+    print(f"Silent error rate: {m.silent_error_rate:.4f}")
+    if not shown:
+        print("nessun campo sbagliato")
+        return
+    print(f"\n{'campo sbagliato' if not all_fields else 'campo':40} "
+          f"{'prec':>6} {'rec':>6} {'em':>6} {'n':>4} {'silent':>6}")
+    for f in shown:
         print(f"{f.field_path:40} {f.precision:6.2f} {f.recall:6.2f} "
               f"{f.exact_match:6.2f} {f.n:4d} {f.silent_errors:6d}")
-    print(f"Silent error rate: {m.silent_error_rate:.4f}")
 
 
 __all__ = ["evaluate", "compare_runs", "compare_annotations", "print_metrics",

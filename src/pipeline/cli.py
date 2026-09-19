@@ -216,11 +216,18 @@ def cmd_eval(args) -> None:
     db = DB()
     prev = db.last_run()  # prima di evaluate(), che registra la run corrente
     m = phase8_eval.evaluate(args.gold_dir, db=db, split=args.split)
-    phase8_eval.print_metrics(m)
+    phase8_eval.print_metrics(m, all_fields=args.all_fields)
     if args.compare_last and prev and prev["run_id"] != m.run_id:
         delta = phase8_eval.compare_runs(db, prev["run_id"], m.run_id)
-        print("\n=== Delta vs run precedente ===")
-        print(json.dumps(delta, indent=2, ensure_ascii=False))
+        changed = delta["delta_fields"]
+        print(f"\n=== Delta vs run {prev['run_id']} ===")
+        print(f"silent error rate: {delta['silent_error_rate']:+.4f}   "
+              f"campi cambiati: {len(changed)}")
+        if not changed:
+            print("NESSUN campo è cambiato: le due run hanno prodotto lo stesso "
+                  "risultato (la pipeline ha rigirato fra le due eval?)")
+        for fp, d in sorted(changed.items(), key=lambda kv: -abs(kv[1]["exact_match"])):
+            print(f"  {fp:38} em={d['exact_match']:+.2f} silent={d['silent_errors']:+d}")
 
 
 def cmd_run(args) -> None:
@@ -397,6 +404,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--gold-dir", default="gold")
     sp.add_argument("--split", default="sealed")
     sp.add_argument("--compare-last", action="store_true")
+    sp.add_argument("--all-fields", action="store_true",
+                    help="stampa ogni campo, non solo quelli sbagliati")
     sp.set_defaults(func=cmd_eval)
 
     sp = sub.add_parser("run")
