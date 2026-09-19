@@ -18,6 +18,9 @@ Target (CUDA): scommenta vllm/paddlepaddle-gpu in `requirements.txt`, poi `pip i
 - End-to-end: `python -m pipeline.cli run <pdf>`
 - Solo fase: `python -m pipeline.cli <subcommand> <pdf>` (v. `cli.py`)
 - Valutazione gold: `python -m pipeline.cli eval`
+- Un documento porta le estrazioni di PIÙ envelope: sono separate da
+  `extractions.schema_name` e lo stato è in `extraction_state(doc_id, schema_name)`.
+  `documents.status` copre solo l'OCR (fasi 1-3).
 - Riestrazione senza rifare l'OCR: `python -m pipeline.cli reorder --doc-id <id>`
   (riordina le regioni con `reading_order` e azzera l'estrazione), poi `run`:
   i modelli OCR non vengono caricati se non c'è lavoro per loro.

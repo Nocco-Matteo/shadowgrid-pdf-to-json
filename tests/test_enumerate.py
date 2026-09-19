@@ -37,11 +37,11 @@ def test_enumerate_valid_anchor(db):
     client = StubExtractor({"items": [
         {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": []},
     ]})
-    items = run("doc_a", "parties", db=db, client=client)
+    items = run("doc_a", "parties", "contract", db=db, client=client)
     assert len(items) == 1
     assert items[0].anchor == "Contratto n. 44/B"
     # stato transitito a enumerated
-    assert db.get_status("doc_a") == "enumerated"
+    assert db.schema_status("doc_a", "contract") == "enumerated"
 
 
 def test_enumerate_drops_invented_anchor(db):
@@ -49,7 +49,7 @@ def test_enumerate_drops_invented_anchor(db):
         {"anchor": "Pippo Pluto Inesistente", "page": 1, "region_ids": []},
         {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": []},
     ]})
-    items = run("doc_a", "parties", db=db, client=client)
+    items = run("doc_a", "parties", "contract", db=db, client=client)
     assert len(items) == 1
     assert items[0].anchor == "Contratto n. 44/B"
 
@@ -59,7 +59,7 @@ def test_enumerate_dedup(db):
         {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": []},
         {"anchor": "contratto n. 44/b", "page": 1, "region_ids": []},
     ]})
-    items = run("doc_a", "parties", db=db, client=client)
+    items = run("doc_a", "parties", "contract", db=db, client=client)
     assert len(items) == 1
 
 
@@ -67,8 +67,8 @@ def test_enumerate_coverage_mismatch_needs_review(db):
     client = StubExtractor({"items": [
         {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": []},
     ]})
-    run("doc_a", "parties", db=db, client=client, expected_count=5)
-    assert db.get_status("doc_a") == "needs_review"
+    run("doc_a", "parties", "contract", db=db, client=client, expected_count=5)
+    assert db.schema_status("doc_a", "contract") == "needs_review"
 
 
 def test_enumerate_persists_validated_region_ids(db):
@@ -80,7 +80,7 @@ def test_enumerate_persists_validated_region_ids(db):
         # id valido (1), id inventato (99) -> quest'ultimo scartato
         {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": [1, 99]},
     ]})
-    items = run("doc_a", "parties", db=db, client=client)
+    items = run("doc_a", "parties", "contract", db=db, client=client)
     assert items[0].region_ids == [1]
     inv = db.latest_extraction("doc_a", "parties$inventory")
     assert inv is not None
@@ -93,11 +93,11 @@ def test_enumerate_recoverable_from_needs_review(db):
     client = StubExtractor({"items": [
         {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": []},
     ]})
-    run("doc_a", "parties", db=db, client=client, expected_count=5)
-    assert db.get_status("doc_a") == "needs_review"
-    items = run("doc_a", "parties", db=db, client=client, expected_count=1)
+    run("doc_a", "parties", "contract", db=db, client=client, expected_count=5)
+    assert db.schema_status("doc_a", "contract") == "needs_review"
+    items = run("doc_a", "parties", "contract", db=db, client=client, expected_count=1)
     assert len(items) == 1
-    assert db.get_status("doc_a") == "enumerated"
+    assert db.schema_status("doc_a", "contract") == "enumerated"
 
 
 def test_enumerate_dedup_same_region_different_anchor_length(db):
@@ -110,7 +110,7 @@ def test_enumerate_dedup_same_region_different_anchor_length(db):
         {"anchor": "Contratto n. 44/B del 2024", "page": 1, "region_ids": [1]},
         {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": [1]},
     ]})
-    items = run("doc_a", "parties", db=db, client=client)
+    items = run("doc_a", "parties", "contract", db=db, client=client)
     assert len(items) == 1
     assert items[0].anchor == "Contratto n. 44/B del 2024"  # vince il primo
 
@@ -124,5 +124,5 @@ def test_enumerate_keeps_same_anchor_on_different_regions(db):
         {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": [1]},
         {"anchor": "Contratto n. 44/B", "page": 1, "region_ids": [2]},
     ]})
-    items = run("doc_a", "parties", db=db, client=client)
+    items = run("doc_a", "parties", "contract", db=db, client=client)
     assert len(items) == 2

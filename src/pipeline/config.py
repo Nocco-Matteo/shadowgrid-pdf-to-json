@@ -97,6 +97,15 @@ class Settings(BaseSettings):
     extractor_temperature: float = 0.0
     extractor_seed: int = 12345
     max_fields_per_task: int = 8
+    # Caratteri di TABELLE aggiunti al contesto di un elemento (la sua pagina e
+    # quella della sua sezione). Il manuale mette la regola nella prosa e il
+    # numero in tabella: senza, l'estrattore dichiara un'assenza. Mediana
+    # osservata sul PHB: ~1.100 caratteri per pagina, peggior caso ~6.300.
+    item_table_context_chars: int = 8000
+    # Caratteri di PROSA dell'elemento: dalla sua anchor a dove comincia il
+    # successivo. Con gli elementi a intestazione (capacità di classe) il corpo
+    # della regola sta nei paragrafi dopo il titolo, non nel titolo.
+    item_span_chars: int = 6000
     # Token massimi di risposta dell'estrattore
     extractor_max_tokens: int = 2048
     # Fase 4: token di regioni per chiamata. None = automatico dal contesto

@@ -124,7 +124,8 @@ def test_retry_reextracts_with_error(tmp_path):
     s.db_path.parent.mkdir(parents=True, exist_ok=True)
     db = DB(s)
     db.upsert_document("d", "/a.pdf", "sha", 1)
-    db.set_status("d", "extracted")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "extracted")
     db.set_page("d", 1, full_text=(
         "Contratto n. 44/B del 2024\n"
         "Data emissione: 2024-03-15\n"
@@ -133,20 +134,20 @@ def test_retry_reextracts_with_error(tmp_path):
         "Parti: ACME - buyer"
     ))
     # tentativo 1: quote allucinata -> grounding fallisce
-    db.upsert_extraction("d", "contract_number", '"44/B"', "pippo", 1, None, 1, "pending")
+    db.upsert_extraction("d", "contract_number", '"44/B"', "pippo", 1, None, 1, "pending", schema_name="contract")
     # gli altri campi del task sono a posto
     db.upsert_extraction("d", "issue_date", '"2024-03-15"',
-                         "Data emissione: 2024-03-15", 1, None, 1, "pending")
+                         "Data emissione: 2024-03-15", 1, None, 1, "pending", schema_name="contract")
     db.upsert_extraction("d", "amount_eur", "1234.5",
-                         "Importo: 1.234,50 EUR", 1, None, 1, "pending")
-    db.upsert_extraction("d", "currency", '"EUR"', "Valuta: EUR", 1, None, 1, "pending")
+                         "Importo: 1.234,50 EUR", 1, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "currency", '"EUR"', "Valuta: EUR", 1, None, 1, "pending", schema_name="contract")
     # inventario + parte (amount > 0 richiede almeno una parte)
     db.upsert_extraction("d", "parties$inventory",
                          '[{"anchor": "ACME", "page": 1, "region_ids": []}]',
-                         None, None, None, 1, "validated")
-    db.upsert_extraction("d", "parties[0].name", '"ACME"', "ACME", 1, None, 1, "pending")
-    db.upsert_extraction("d", "parties[0].role", '"buyer"', "ACME - buyer", 1, None, 1, "pending")
-    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "pending")
+                         None, None, None, 1, "validated", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].name", '"ACME"', "ACME", 1, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].role", '"buyer"', "ACME - buyer", 1, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "pending", schema_name="contract")
 
     calls = []
 
@@ -164,7 +165,7 @@ def test_retry_reextracts_with_error(tmp_path):
     row = db.latest_extraction("d", "contract_number")
     assert row["attempt"] == 2
     assert row["status"] == "validated"
-    assert db.get_status("d") == "validated"
+    assert db.schema_status("d", "contract") == "validated"
     # l'errore è stato accodato al prompt del retry
     assert calls and "FALLITO" in calls[0]
 
@@ -181,9 +182,10 @@ def test_retry_exhausted_goes_needs_review(tmp_path):
     s.db_path.parent.mkdir(parents=True, exist_ok=True)
     db = DB(s)
     db.upsert_document("d", "/a.pdf", "sha", 1)
-    db.set_status("d", "extracted")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "extracted")
     db.set_page("d", 1, full_text="Contratto n. 44/B del 2024")
-    db.upsert_extraction("d", "contract_number", '"44/B"', "pippo", 1, None, 1, "pending")
+    db.upsert_extraction("d", "contract_number", '"44/B"', "pippo", 1, None, 1, "pending", schema_name="contract")
 
     class AlwaysBad:
         def extract(self, prompt, images_b64=None, guided_json_schema=None):
@@ -194,7 +196,7 @@ def test_retry_exhausted_goes_needs_review(tmp_path):
 
     row = db.latest_extraction("d", "contract_number")
     assert row["status"] == "needs_review"
-    assert db.get_status("d") == "needs_review"
+    assert db.schema_status("d", "contract") == "needs_review"
 
 
 def test_zero_extractions_needs_review(tmp_path):
@@ -209,7 +211,8 @@ def test_zero_extractions_needs_review(tmp_path):
     s.db_path.parent.mkdir(parents=True, exist_ok=True)
     db = DB(s)
     db.upsert_document("d", "/a.pdf", "sha", 1)
-    db.set_status("d", "extracted")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "extracted")
     db.set_page("d", 1, full_text="Contratto n. 44/B del 2024")
 
     class Unused:
@@ -217,7 +220,7 @@ def test_zero_extractions_needs_review(tmp_path):
             raise AssertionError("non deve essere chiamato: nessun pending")
 
     run("d", ContractStrict, db=db, settings=s, client=Unused())
-    assert db.get_status("d") == "needs_review"
+    assert db.schema_status("d", "contract") == "needs_review"
 
 
 def test_explicit_null_validated_as_absence(tmp_path):
@@ -232,7 +235,8 @@ def test_explicit_null_validated_as_absence(tmp_path):
     s.db_path.parent.mkdir(parents=True, exist_ok=True)
     db = DB(s)
     db.upsert_document("d", "/a.pdf", "sha", 1)
-    db.set_status("d", "extracted")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "extracted")
     db.set_page("d", 1, full_text=(
         "Contratto n. 44/B del 2024\n"
         "Data emissione: 2024-03-15\n"
@@ -241,17 +245,17 @@ def test_explicit_null_validated_as_absence(tmp_path):
         "Parti: ACME - buyer"
     ))
     db.upsert_extraction("d", "contract_number", '"44/B"', "Contratto n. 44/B", 1,
-                         None, 1, "pending")
-    db.upsert_extraction("d", "issue_date", None, None, None, None, 1, "pending")
+                         None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "issue_date", None, None, None, None, 1, "pending", schema_name="contract")
     db.upsert_extraction("d", "amount_eur", "1234.5",
-                         "Importo: 1.234,50 EUR", 1, None, 1, "pending")
-    db.upsert_extraction("d", "currency", '"EUR"', "Valuta: EUR", 1, None, 1, "pending")
+                         "Importo: 1.234,50 EUR", 1, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "currency", '"EUR"', "Valuta: EUR", 1, None, 1, "pending", schema_name="contract")
     db.upsert_extraction("d", "parties$inventory",
                          '[{"anchor": "ACME", "page": 1, "region_ids": []}]',
-                         None, None, None, 1, "validated")
-    db.upsert_extraction("d", "parties[0].name", '"ACME"', "ACME", 1, None, 1, "pending")
-    db.upsert_extraction("d", "parties[0].role", '"buyer"', "ACME - buyer", 1, None, 1, "pending")
-    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "pending")
+                         None, None, None, 1, "validated", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].name", '"ACME"', "ACME", 1, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].role", '"buyer"', "ACME - buyer", 1, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "pending", schema_name="contract")
 
     class NoCalls:
         def extract(self, prompt, images_b64=None, guided_json_schema=None):
@@ -261,7 +265,7 @@ def test_explicit_null_validated_as_absence(tmp_path):
     row = db.latest_extraction("d", "issue_date")
     assert row["status"] == "validated"
     assert row["value_json"] is None
-    assert db.get_status("d") == "validated"
+    assert db.schema_status("d", "contract") == "validated"
 
 
 def test_grounding_uses_canonical_text(tmp_path):
@@ -276,7 +280,8 @@ def test_grounding_uses_canonical_text(tmp_path):
     s.db_path.parent.mkdir(parents=True, exist_ok=True)
     db = DB(s)
     db.upsert_document("d", "/a.pdf", "sha", 1)
-    db.set_status("d", "extracted")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "extracted")
     db.set_page("d", 1, image_path="/p1.png", dpi=300, deskew_angle=0.0)
     from pipeline.ocr_clients import Region
 
@@ -292,7 +297,7 @@ def test_grounding_uses_canonical_text(tmp_path):
     assert "Impofto" in db.get_page("d", 1)["full_text"]
 
     db.upsert_extraction("d", "amount_eur", "1234.50", "Importo: 1.234,50 EUR", 1,
-                         None, 1, "pending")
+                         None, 1, "pending", schema_name="contract")
 
     class NoRetry:
         def extract(self, prompt, images_b64=None, guided_json_schema=None):
@@ -316,11 +321,12 @@ def test_partial_document_needs_review(tmp_path):
     s.db_path.parent.mkdir(parents=True, exist_ok=True)
     db = DB(s)
     db.upsert_document("d", "/a.pdf", "sha", 1)
-    db.set_status("d", "extracted")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "extracted")
     db.set_page("d", 1, full_text="Contratto n. 44/B del 2024")
     # Solo contract_number prodotto: tutti gli altri campi mai visti
     db.upsert_extraction("d", "contract_number", '"44/B"',
-                         "Contratto n. 44/B", 1, None, 1, "pending")
+                         "Contratto n. 44/B", 1, None, 1, "pending", schema_name="contract")
 
     class NoCalls:
         def extract(self, prompt, images_b64=None, guided_json_schema=None):
@@ -329,7 +335,7 @@ def test_partial_document_needs_review(tmp_path):
     run("d", ContractStrict, db=db, settings=s, client=NoCalls())
     # il campo buono si valida, ma il documento resta in revisione
     assert db.latest_extraction("d", "contract_number")["status"] == "validated"
-    assert db.get_status("d") == "needs_review"
+    assert db.schema_status("d", "contract") == "needs_review"
 
 
 def test_validate_from_needs_review_finalizes(tmp_path):
@@ -345,21 +351,22 @@ def test_validate_from_needs_review_finalizes(tmp_path):
     s.db_path.parent.mkdir(parents=True, exist_ok=True)
     db = DB(s)
     db.upsert_document("d", "/a.pdf", "sha", 1)
-    db.set_status("d", "needs_review")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "needs_review")
     db.set_page("d", 1, full_text="x")
-    db.upsert_extraction("d", "contract_number", '"44/B"', "q", 1, None, 1, "validated")
-    db.upsert_extraction("d", "issue_date", None, None, None, None, 1, "validated")
-    db.upsert_extraction("d", "amount_eur", "1234.5", "q", 1, None, 1, "validated")
-    db.upsert_extraction("d", "currency", '"EUR"', "q", 1, None, 1, "validated")
+    db.upsert_extraction("d", "contract_number", '"44/B"', "q", 1, None, 1, "validated", schema_name="contract")
+    db.upsert_extraction("d", "issue_date", None, None, None, None, 1, "validated", schema_name="contract")
+    db.upsert_extraction("d", "amount_eur", "1234.5", "q", 1, None, 1, "validated", schema_name="contract")
+    db.upsert_extraction("d", "currency", '"EUR"', "q", 1, None, 1, "validated", schema_name="contract")
     db.upsert_extraction("d", "parties$inventory",
                          '[{"anchor": "ACME", "page": 1, "region_ids": []}]',
-                         None, None, None, 1, "validated")
-    db.upsert_extraction("d", "parties[0].name", '"ACME"', "q", 1, None, 1, "validated")
-    db.upsert_extraction("d", "parties[0].role", '"buyer"', "q", 1, None, 1, "validated")
-    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "validated")
+                         None, None, None, 1, "validated", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].name", '"ACME"', "q", 1, None, 1, "validated", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].role", '"buyer"', "q", 1, None, 1, "validated", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "validated", schema_name="contract")
 
     run("d", ContractStrict, db=db, settings=s)
-    assert db.get_status("d") == "done"
+    assert db.schema_status("d", "contract") == "done"
 
 
 def test_retry_list_item_reads_single_element_response(tmp_path):
@@ -378,7 +385,8 @@ def test_retry_list_item_reads_single_element_response(tmp_path):
     s.work_dir.mkdir(parents=True, exist_ok=True)
     db = DB(s)
     db.upsert_document("d", "/a.pdf", "sha", 1)
-    db.set_status("d", "extracted")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "extracted")
     db.set_page("d", 1, full_text=(
         "CONTRATTO N. 44/B\nData emissione: 2024-03-15\nImporto: 1.234,50 EUR\n"
         "Valuta: EUR\nMario Rossi - Acquirente\nLucia Bianchi - Venditore"
@@ -389,16 +397,16 @@ def test_retry_list_item_reads_single_element_response(tmp_path):
                      ("currency", '"EUR"', "Valuta: EUR"),
                      ("parties[0].name", '"Mario Rossi"', "Mario Rossi"),
                      ("parties[0].role", '"Acquirente"', "Acquirente")]:
-        db.upsert_extraction("d", fp, v, q, 1, None, 1, "pending")
+        db.upsert_extraction("d", fp, v, q, 1, None, 1, "pending", schema_name="contract")
     db.upsert_extraction("d", "parties$inventory",
                          '[{"anchor": "Mario Rossi", "page": 1}, {"anchor": "Lucia Bianchi", "page": 1}]',
-                         None, None, None, 1, "validated")
-    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "pending")
+                         None, None, None, 1, "validated", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "pending", schema_name="contract")
     # parties[1].name: tentativo 1 senza pagina -> grounding fallisce
     db.upsert_extraction("d", "parties[1].name", '"Lucia Bianchi"', "Lucia Bianchi",
-                         None, None, 1, "pending")
-    db.upsert_extraction("d", "parties[1].role", '"Venditore"', "Venditore", 1, None, 1, "pending")
-    db.upsert_extraction("d", "parties[1].vat_id", None, None, None, None, 1, "pending")
+                         None, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "parties[1].role", '"Venditore"', "Venditore", 1, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "parties[1].vat_id", None, None, None, None, 1, "pending", schema_name="contract")
 
     schemas = []
 
@@ -508,21 +516,22 @@ def test_retry_falls_back_when_server_rejects_the_narrow_schema(tmp_path):
     s.work_dir.mkdir(parents=True, exist_ok=True)
     db = DB(s)
     db.upsert_document("d", "/a.pdf", "sha", 1)
-    db.set_status("d", "extracted")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "extracted")
     db.set_page("d", 1, full_text="Mario Rossi - Acquirente\nLucia Bianchi - Venditore")
     db.upsert_extraction("d", "parties$inventory",
                          '[{"anchor": "Mario Rossi", "page": 1}, '
                          '{"anchor": "Lucia Bianchi", "page": 1}]',
-                         None, None, None, 1, "validated")
+                         None, None, None, 1, "validated", schema_name="contract")
     for fp, v, q in [("parties[0].name", '"Mario Rossi"', "Mario Rossi"),
                      ("parties[0].role", '"Acquirente"', "Acquirente")]:
-        db.upsert_extraction("d", fp, v, q, 1, None, 1, "pending")
-    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "pending")
-    db.upsert_extraction("d", "parties[1].vat_id", None, None, None, None, 1, "pending")
-    db.upsert_extraction("d", "parties[1].role", '"Venditore"', "Venditore", 1, None, 1, "pending")
+        db.upsert_extraction("d", fp, v, q, 1, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "parties[0].vat_id", None, None, None, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "parties[1].vat_id", None, None, None, None, 1, "pending", schema_name="contract")
+    db.upsert_extraction("d", "parties[1].role", '"Venditore"', "Venditore", 1, None, 1, "pending", schema_name="contract")
     # pagina assente -> grounding fallisce -> retry
     db.upsert_extraction("d", "parties[1].name", '"Lucia Bianchi"', "Lucia Bianchi",
-                         None, None, 1, "pending")
+                         None, None, 1, "pending", schema_name="contract")
 
     def leaf(v):
         return {"value": v, "quote": v, "page": 1, "bbox": None, "confidence": "high"}

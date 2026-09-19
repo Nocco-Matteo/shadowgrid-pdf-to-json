@@ -51,7 +51,8 @@ def _in_reading_order(regions: list[Region], page_height: float | None) -> list[
     """Riordina le regioni di una pagina in ordine di lettura e rinumera
     order_idx. I motori emettono i blocchi nel loro ordine interno, che su un
     impaginato a colonne non è quello di lettura: v. geometry.reading_order."""
-    order = reading_order([r.bbox for r in regions], page_height)
+    order = reading_order([r.bbox for r in regions], page_height,
+                          in_flow=[bool((r.text or "").strip()) for r in regions])
     out = [regions[i] for i in order]
     for idx, r in enumerate(out):
         r.order_idx = idx

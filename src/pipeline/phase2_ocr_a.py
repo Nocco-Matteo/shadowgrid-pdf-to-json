@@ -84,7 +84,8 @@ def reorder(doc_id: str, db: DB | None = None, settings: Settings | None = None)
             if len(rows) < 2:
                 continue
             boxes = [tuple(json.loads(r["bbox"])) if r["bbox"] else None for r in rows]
-            order = reading_order(boxes, height)
+            flow = [bool((r["text_canonical"] or r["text"] or "").strip()) for r in rows]
+            order = reading_order(boxes, height, in_flow=flow)
             if order == list(range(len(rows))):
                 continue
             db.set_region_order(doc_id, [rows[i]["region_id"] for i in order])

@@ -122,7 +122,9 @@ def _columns(idxs: list[int], boxes: list[BBox], width: float) -> list[list[int]
 
 
 def reading_order(
-    boxes: Sequence[BBox | None], page_height: float | None = None
+    boxes: Sequence[BBox | None],
+    page_height: float | None = None,
+    in_flow: Sequence[bool] | None = None,
 ) -> list[int]:
     """Indici delle regioni in ordine di lettura.
 
@@ -142,6 +144,15 @@ def reading_order(
     testa alla pagina. Il motore la posizione delle colonne la azzecca quasi
     sempre; è dentro la colonna che sbaglia.
 
+    `in_flow` marca le regioni che partecipano al flusso: quelle senza testo
+    (figure, fregi) non ne fanno parte e vanno TOLTE dal calcolo delle colonne,
+    non solo ignorate alla fine. Una regione vuota larga che comincia dove
+    finisce la colonna sinistra e arriva in fondo alla destra salda le due
+    colonne in una sola, e l'intera pagina finisce ordinata per y: sulla pagina
+    41 del Player's Handbook le due colonne uscivano interlacciate per colpa di
+    una regione vuota larga il 58,8% della pagina, appena sotto la soglia di
+    spanner. Nel PHB ce ne sono 402 su 9.535.
+
     `page_height` serve solo a riconoscere gli elementi di servizio nei margini
     (numero di pagina, titolo corrente): restano dove li ha messi il motore,
     in testa o in coda. Senza, un piè di pagina finisce in fondo alla colonna
@@ -154,6 +165,14 @@ def reading_order(
     n = len(boxes)
     if n < 2 or any(b is None for b in boxes):
         return list(range(n))
+    if in_flow is not None and not all(in_flow):
+        keep = [i for i in range(n) if in_flow[i]]
+        rest = [i for i in range(n) if not in_flow[i]]
+        if len(keep) < 2:
+            return list(range(n))
+        sub = reading_order([boxes[i] for i in keep], page_height)
+        # le regioni fuori flusso non portano testo: in coda, nell'ordine del motore
+        return [keep[k] for k in sub] + rest
     bs: list[BBox] = [(float(b[0]), float(b[1]), float(b[2]), float(b[3]))
                       for b in boxes]  # type: ignore[index]
     left = min(b[0] for b in bs)

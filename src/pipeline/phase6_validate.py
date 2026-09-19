@@ -35,7 +35,13 @@ from rapidfuzz.fuzz import partial_ratio
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
-from .schema import BASE_WALKING_SPEED, _is_extracted_model, _list_inner_type, guided_schema
+from .schema import (
+    BASE_WALKING_SPEED,
+    _is_extracted_model,
+    _list_inner_type,
+    guided_schema,
+    schema_name_of,
+)
 from .text_norm import normalize
 
 log = logging.getLogger(__name__)
@@ -281,7 +287,9 @@ def _check_coverage(schema_strict: type, db: DB, doc_id: str) -> set[str]:
     """Campi attesi mai prodotti da nessun tentativo: lavoro incompleto,
     NON assenza (l'assenza dichiarata è una riga con value=null)."""
     expected = _schema_leaf_paths(schema_strict, db, doc_id)
-    present = {r["field_path"] for r in db.latest_extractions(doc_id)
+    present = {r["field_path"]
+               for r in db.latest_extractions(doc_id,
+                                              schema_name=schema_name_of(schema_strict))
                if "$" not in r["field_path"]}
     return expected - present
 
@@ -295,9 +303,10 @@ def run(
 ) -> None:
     s = settings or get_settings()
     db = db or DB(s)
-    st = db.get_status(doc_id)
+    name = schema_name_of(schema_strict)
+    st = db.schema_status(doc_id, name)
     if st in ("validated", "done"):
-        log.info("Validazione già fatta: %s", doc_id)
+        log.info("Validazione %s già fatta: %s", name, doc_id)
         return
     if st == "needs_review":
         # ripresa: rivalida i pending, poi chiudi con la logica della revisione
@@ -309,15 +318,15 @@ def run(
 
     client = client or ExtractorClient(s.extractor_url, s.extractor_model)
 
-    extractions = db.get_extractions(doc_id, status="pending")
+    extractions = db.get_extractions(doc_id, status="pending", schema_name=name)
     # Guardia: zero estrazioni reali (es. risposta {} dell'estrattore) non è
     # "documento senza dati", è un'estrazione fallita. I null espliciti
     # producono righe, quindi qui zero righe = qualcosa si è rotto a monte.
-    real_rows = [r for r in db.get_extractions(doc_id) if "$" not in r["field_path"]]
+    real_rows = [r for r in db.get_extractions(doc_id, schema_name=name) if "$" not in r["field_path"]]
     if not real_rows:
         log.error("Nessuna estrazione per %s: estrazione fallita o risposta vuota",
                   doc_id)
-        db.set_status(doc_id, "needs_review")
+        db.set_schema_status(doc_id, name, "needs_review")
         return
     # raggruppa per field_path per gestire i retry
     by_field: dict[str, list] = {}
@@ -334,7 +343,7 @@ def run(
             needs_review = True
 
     if needs_review:
-        db.set_status(doc_id, "needs_review")
+        db.set_schema_status(doc_id, name, "needs_review")
         return
 
     # Copertura: campi mai prodotti NON diventano assenze via _fill_missing.
@@ -342,20 +351,20 @@ def run(
     if missing:
         log.error("Campi mai prodotti per %s (task incompleti?): %s",
                   doc_id, sorted(missing)[:10])
-        db.set_status(doc_id, "needs_review")
+        db.set_schema_status(doc_id, name, "needs_review")
         return
 
     # 6.3 sul documento completo: ricostruisci il dict e valida SchemaStrict.
     # _fill_missing ora non sintetizza nulla di significativo: la copertura
     # è stata verificata sopra (serve solo a completare la struttura).
-    doc_dict = _build_document(db.get_extractions(doc_id, status="validated"))
+    doc_dict = _build_document(db.get_extractions(doc_id, status="validated", schema_name=name))
     _fill_missing(schema_strict, doc_dict)
     schema_ok, err = gate_schema(schema_strict, doc_dict)
     if not schema_ok:
         log.error("Schema strict fallito sul documento %s: %s", doc_id, err)
-        db.set_status(doc_id, "needs_review")
+        db.set_schema_status(doc_id, name, "needs_review")
         return
-    db.transition(doc_id, "extracted", "validated")
+    db.transition_schema(doc_id, name, "extracted", "validated")
 
 
 def _run_from_needs_review(
@@ -369,7 +378,8 @@ def _run_from_needs_review(
     o correzioni umane): processa i pending e chiude il ciclo con gli stessi
     criteri di completezza della revisione umana."""
     client = client or ExtractorClient(s.extractor_url, s.extractor_model)
-    extractions = db.get_extractions(doc_id, status="pending")
+    name = schema_name_of(schema_strict)
+    extractions = db.get_extractions(doc_id, status="pending", schema_name=name)
     by_field: dict[str, list] = {}
     for e in extractions:
         by_field.setdefault(e["field_path"], []).append(e)
@@ -448,7 +458,8 @@ def _validate_one(
     # non fallita. I cancelli non hanno senso senza citazione.
     if value is None and quote is None:
         db.upsert_extraction(doc_id, field_path, None, None, page_no,
-                             None, attempt, "validated", row["confidence"])
+                             None, attempt, "validated", row["confidence"],
+                             schema_name=schema_name_of(schema_strict))
         return True, attempt
 
     # 6.1 grounding (sul testo canonico riconciliato della pagina)
@@ -468,8 +479,9 @@ def _validate_one(
         log.warning("Coerenza value/quote fallita per %s", field_path)
         # non si ritenta per 6.2: citazione autentica ma interpretazione sbagliata
         db.upsert_extraction(doc_id, field_path, row["value_json"], quote, page_no,
-                             _bbox(row), attempt, "rejected", row["confidence"])
-        db.set_status(doc_id, "needs_review")
+                             _bbox(row), attempt, "rejected", row["confidence"],
+                             schema_name=schema_name_of(schema_strict))
+        db.set_schema_status(doc_id, schema_name_of(schema_strict), "needs_review")
         return False, attempt
 
     # 6.3 tassonomia del compendium, per campo. Il check sul documento intero
@@ -493,7 +505,8 @@ def _validate_one(
     bbox = localize_bbox(quote, regions) or _bbox(row)
 
     db.upsert_extraction(doc_id, field_path, row["value_json"], quote, page_no,
-                         bbox, attempt, "validated", row["confidence"])
+                         bbox, attempt, "validated", row["confidence"],
+                         schema_name=schema_name_of(schema_strict))
     return True, attempt
 
 
@@ -735,15 +748,15 @@ def _maybe_retry(
         # al 3° tentativo (max_retries=2 -> attempt 3) -> needs_review
         db.upsert_extraction(doc_id, field_path, row["value_json"], row["quote"],
                              row["page_no"], _bbox(row), attempt, "needs_review",
-                             row["confidence"])
-        db.set_status(doc_id, "needs_review")
+                             row["confidence"], schema_name=schema_name_of(schema_strict))
+        db.set_schema_status(doc_id, schema_name_of(schema_strict), "needs_review")
         return False, attempt
     # rilancia l'estrattore con l'errore accodato al prompt, poi rivalida
     new = _retry_extract(doc_id, field_path, row, err, schema_strict, db, s, client)
     next_attempt = attempt + 1
     db.upsert_extraction(doc_id, field_path, new["value_json"], new["quote"],
                          new["page_no"], new["bbox"], next_attempt, "pending",
-                         new["confidence"])
+                         new["confidence"], schema_name=schema_name_of(schema_strict))
     log.info("Retry %d per %s (err=%s)", next_attempt, field_path, err)
     new_row = db.latest_extraction(doc_id, field_path)
     return _validate_one(doc_id, field_path, new_row, schema_strict, db, s, client)

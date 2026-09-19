@@ -23,7 +23,8 @@ def db(tmp_path, monkeypatch):
     s.db_path.parent.mkdir(parents=True, exist_ok=True)
     d = DB(s)
     d.upsert_document("d", "/a.pdf", "sha", 1)
-    d.set_status("d", "needs_review")
+    d.set_status("d", "reconciled")
+    d.set_schema_status("d", "contract", "needs_review")
     d.set_page("d", 1, full_text="Contratto n. 44/B del 2024")
     yield d
     d.close()
@@ -31,7 +32,7 @@ def db(tmp_path, monkeypatch):
 
 def _upsert(db, field, value, quote, attempt, status, confidence="high"):
     db.upsert_extraction("d", field, json.dumps(value), quote, 1, None,
-                         attempt, status, confidence)
+                         attempt, status, confidence, schema_name="contract")
 
 
 def test_queue_includes_rejected(db):
@@ -68,7 +69,7 @@ def test_finalize_rejects_zero_extractions(db):
     """needs_review senza estrazioni (es. risposta vuota marcata a monte):
     la finalizzazione non può portare a done."""
     assert not finalize_review("d", ContractStrict, db=db)
-    assert db.get_status("d") == "needs_review"
+    assert db.schema_status("d", "contract") == "needs_review"
 
 
 def test_finalize_rejects_pending(db):
@@ -77,7 +78,7 @@ def test_finalize_rejects_pending(db):
     _upsert(db, "contract_number", "44/B", "Contratto n. 44/B", 1, "validated")
     _upsert(db, "issue_date", "2024-03-15", "Data: 2024-03-15", 1, "pending")
     assert not finalize_review("d", ContractStrict, db=db)
-    assert db.get_status("d") == "needs_review"
+    assert db.schema_status("d", "contract") == "needs_review"
 
 
 def test_finalize_needs_full_document(db):
@@ -88,7 +89,7 @@ def test_finalize_needs_full_document(db):
     _upsert(db, "contract_number", "44/B", "Contratto n. 44/B", 1, "validated")
     _upsert(db, "currency", "USD", "Valuta: EUR", 1, "rejected")
     assert not finalize_review("d", ContractStrict, db=db)
-    assert db.get_status("d") == "needs_review"
+    assert db.schema_status("d", "contract") == "needs_review"
 
 
 def test_finalize_goes_done(db):
@@ -99,15 +100,15 @@ def test_finalize_goes_done(db):
     _upsert(db, "parties[0].name", "ACME", "ACME", 1, "validated")
     _upsert(db, "parties[0].role", "buyer", "buyer", 1, "validated")
     assert finalize_review("d", ContractStrict, db=db)
-    assert db.get_status("d") == "done"
+    assert db.schema_status("d", "contract") == "done"
 
 
 def test_finalize_blocked_by_failed_tasks(db):
     """Un task di estrazione fallito blocca la finalizzazione (anche a coda vuota)."""
-    db.record_task("d", "flat_p1_0", "failed", "connection refused")
+    db.record_task("d", "flat_p1_0", "failed", "connection refused", schema_name="contract")
     _upsert(db, "contract_number", "44/B", "Contratto n. 44/B", 1, "validated")
     assert not finalize_review("d", ContractStrict, db=db)
-    assert db.get_status("d") == "needs_review"
+    assert db.schema_status("d", "contract") == "needs_review"
 
 
 def test_finalize_after_corrections(db):
@@ -122,11 +123,12 @@ def test_finalize_after_corrections(db):
     apply_correction("d", "currency", "EUR", db=db)
     assert review_queue("d", db=db) == []
     assert finalize_review("d", ContractStrict, db=db)
-    assert db.get_status("d") == "done"
+    assert db.schema_status("d", "contract") == "done"
 
 
 def test_finalize_from_validated(db):
-    db.set_status("d", "validated")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "contract", "validated")
     _upsert(db, "contract_number", "44/B", "Contratto n. 44/B", 1, "validated")
     _upsert(db, "issue_date", "2024-03-15", "Data emissione: 2024-03-15", 1, "validated")
     _upsert(db, "amount_eur", "1234.5", "Importo: 1.234,50 EUR", 1, "validated")
@@ -134,7 +136,7 @@ def test_finalize_from_validated(db):
     _upsert(db, "parties[0].name", "ACME", "ACME", 1, "validated")
     _upsert(db, "parties[0].role", "buyer", "buyer", 1, "validated")
     assert finalize_review("d", ContractStrict, db=db)
-    assert db.get_status("d") == "done"
+    assert db.schema_status("d", "contract") == "done"
 
 
 def test_conflict_resolution_via_review(db):

@@ -40,13 +40,17 @@ log = logging.getLogger(__name__)
 _REVIEW_STATUSES = ("needs_review", "rejected")
 
 
-def review_queue(doc_id: str, db: DB | None = None, settings: Settings | None = None) -> list[dict]:
+def review_queue(doc_id: str, db: DB | None = None, settings: Settings | None = None,
+                 schema_name: str | None = None) -> list[dict]:
     """Coda ordinata per rischio, costruita sugli ultimi tentativi.
-    Include anche i conflitti OCR non risolti (divergent_low / fallback_a)."""
+    Include anche i conflitti OCR non risolti (divergent_low / fallback_a).
+
+    `schema_name` la restringe a un envelope; i conflitti OCR restano comuni al
+    documento perché precedono l'estrazione."""
     s = settings or get_settings()
     db = db or DB(s)
     items = [
-        dict(r) for r in db.latest_extractions(doc_id)
+        dict(r) for r in db.latest_extractions(doc_id, schema_name=schema_name)
         if r["status"] in _REVIEW_STATUSES and "$" not in r["field_path"]
     ]
 
@@ -139,6 +143,8 @@ def apply_correction(
         doc_id, field_path, json.dumps(new_value, ensure_ascii=False),
         row["quote"] if row else None, row["page_no"] if row else None,
         _bbox(row) if row else None, attempt, "validated", "high",
+        # la correzione appartiene all'envelope della riga che corregge
+        schema_name=row["schema_name"] if row else None,
     )
     _save_correction(doc_id, field_path, new_value)
 
@@ -205,12 +211,15 @@ def finalize_review(
     s = settings or get_settings()
     db = db or DB(s)
 
-    st = db.get_status(doc_id)
+    from .schema import schema_name_of
+
+    name = schema_name_of(schema_strict)
+    st = db.schema_status(doc_id, name)
     if st not in ("needs_review", "validated"):
-        log.warning("Finalizzazione non applicabile dallo stato %s (%s)", st, doc_id)
+        log.warning("Finalizzazione %s non applicabile dallo stato %s (%s)", name, st, doc_id)
         return False
 
-    latest = db.latest_extractions(doc_id)
+    latest = db.latest_extractions(doc_id, schema_name=name)
     real = [r for r in latest if "$" not in r["field_path"]]
     if not real:
         log.error("Nessuna estrazione per %s: niente done", doc_id)
@@ -221,12 +230,12 @@ def finalize_review(
         log.error("Estrazioni ancora pending per %s: %s", doc_id, pending)
         return False
 
-    remaining = review_queue(doc_id, db, s)
+    remaining = review_queue(doc_id, db, s, schema_name=name)
     if remaining:
         log.info("Revisione di %s incompleta: %d elementi in coda", doc_id, len(remaining))
         return False
 
-    failed = db.failed_tasks(doc_id)
+    failed = db.failed_tasks(doc_id, schema_name=name)
     if failed:
         log.error("Task di estrazione falliti per %s: %s -> niente done",
                   doc_id, [f["task_name"] for f in failed])
@@ -246,11 +255,8 @@ def finalize_review(
         log.error("Schema strict fallito sul documento %s: %s", doc_id, err)
         return False
 
-    if st == "needs_review":
-        db.transition(doc_id, "needs_review", "done")
-    else:
-        db.transition(doc_id, "validated", "done")
-    log.info("Documento %s finalizzato: done", doc_id)
+    db.transition_schema(doc_id, name, st, "done")
+    log.info("Documento %s / %s finalizzato: done", doc_id, name)
     return True
 
 

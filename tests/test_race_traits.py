@@ -97,31 +97,32 @@ def test_race_traits_end_to_end(env, tmp_path):
     db, s = env
     stub = Stub(db)
     desc = RaceTraitsDoc.model_fields["traits"].description
-    phase4_enumerate.run("d", "traits", db=db, settings=s, client=stub, description=desc)
+    phase4_enumerate.run("d", "traits", "race_traits", db=db, settings=s, client=stub, description=desc)
     inv = json.loads(db.latest_extraction("d", "traits$inventory")["value_json"])
     assert [(it["anchor"], it["section"], it["section_page"]) for it in inv] == [
         ("Darkvision", "Dwarf Traits", 1), ("Dwarven Resilience", "Dwarf Traits", 1),
         ("Dwarven Toughness", "Hill Dwarf", 2)]
-    assert "SOLO tratti che cambiano un numero" in stub.prompts[0]
+    assert "OGNI tratto che cambia qualcosa che la scheda calcola" in stub.prompts[0]
 
     phase5_extract.run("d", RaceTraitsDoc, db=db, settings=s, client=stub)
     item_prompt = next(p for p in stub.prompts if "ELEMENTO: Dwarven Toughness" in p)
     # il titolo della sottorazza è nel contesto, con la pagina; campi descritti
     assert "p.2 text: Hill Dwarf" in item_prompt and "SEZIONE: Hill Dwarf" in item_prompt
-    assert "- effects: effetti numerici" in item_prompt
+    assert "- effects: effetti del tratto nella tassonomia" in item_prompt
     # lo schema guidato vincola effects alla tassonomia del compendium
     assert any(k.startswith("cmp__effects__resistance") for k in stub.schemas[-1]["$defs"])
 
     phase6_validate.run("d", RaceTraitsDoc, db=db, settings=s, client=stub)
-    assert db.get_status("d") == "validated"
+    assert db.schema_status("d", "race_traits") == "validated"
 
     out = export_doc("d", RaceTraitsDoc, db, s, ["players_handbook"])
     envelope = json.loads(out.read_text())
     assert validate_envelope(envelope, "raceTraits.json") == []
     by_id = {d["id"]: d for d in envelope["definitions"]}
-    # id e sources del seed riusati; Darkvision (nessun numero) escluso
+    # envelope AUTONOMO dal manuale: le sources sono solo quelle del libro
+    # processato, non quelle ereditate da un seed curato altrove
     assert set(by_id) == {"race_dwarf_dwarven_resilience", "race_dwarf_hill_dwarven_toughness"}
-    assert by_id["race_dwarf_dwarven_resilience"]["sources"] == ["plane_shift", "players_handbook"]
+    assert by_id["race_dwarf_dwarven_resilience"]["sources"] == ["players_handbook"]
     assert by_id["race_dwarf_hill_dwarven_toughness"]["subraceName"] == "Hill"
     assert by_id["race_dwarf_hill_dwarven_toughness"]["grantedAtLevel"] == 1
     notes = (out.parent / "raceTraits.json.notes.txt").read_text()
@@ -139,10 +140,10 @@ def test_invalid_effect_fails_strict_schema(env):
             return out
 
     stub = BadEffect(db)
-    phase4_enumerate.run("d", "traits", db=db, settings=s, client=stub)
+    phase4_enumerate.run("d", "traits", "race_traits", db=db, settings=s, client=stub)
     phase5_extract.run("d", RaceTraitsDoc, db=db, settings=s, client=stub)
     phase6_validate.run("d", RaceTraitsDoc, db=db, settings=s, client=stub)
-    assert db.get_status("d") == "needs_review"
+    assert db.schema_status("d", "race_traits") == "needs_review"
 
 
 def test_invalid_effect_never_reaches_the_export(env):
@@ -164,7 +165,7 @@ def test_invalid_effect_never_reaches_the_export(env):
             return out
 
     stub = BadEffect(db)
-    phase4_enumerate.run("d", "traits", db=db, settings=s, client=stub)
+    phase4_enumerate.run("d", "traits", "race_traits", db=db, settings=s, client=stub)
     phase5_extract.run("d", RaceTraitsDoc, db=db, settings=s, client=stub)
     phase6_validate.run("d", RaceTraitsDoc, db=db, settings=s, client=stub)
 
@@ -201,7 +202,7 @@ def test_enumerate_keeps_same_name_on_different_pages(env):
                 {"anchor": "Dwarven Resilience", "page": 1, "region_ids": [], "section": None},
             ]}
 
-    items = phase4_enumerate.run("d", "traits", db=db, settings=s, client=Twice())
+    items = phase4_enumerate.run("d", "traits", "race_traits", db=db, settings=s, client=Twice())
     assert [(i.anchor, i.page) for i in items] == [("Dwarven Resilience", 1), ("Dwarven Toughness", 2)]
 
 
@@ -209,9 +210,10 @@ def test_reset_extraction_keeps_ocr(env):
     """Documento già estratto con un altro schema: si riparte da reconciled
     senza rifare l'OCR (e senza righe del vecchio schema nel documento)."""
     db, s = env
-    db.upsert_extraction("d", "contract_number", '"44/B"', "x", 1, None, 1, "needs_review")
-    db.record_task("d", "flat_p1_0", "ok")
-    db.set_status("d", "needs_review")
+    db.upsert_extraction("d", "contract_number", '"44/B"', "x", 1, None, 1, "needs_review", schema_name="race_traits")
+    db.record_task("d", "flat_p1_0", "ok", schema_name="race_traits")
+    db.set_status("d", "reconciled")
+    db.set_schema_status("d", "race_traits", "needs_review")
     db.reset_extraction("d")
     assert db.get_status("d") == "reconciled"
     assert db.get_extractions("d") == [] and db.task_status("d", "flat_p1_0") is None

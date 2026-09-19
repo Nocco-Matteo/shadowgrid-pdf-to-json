@@ -154,12 +154,12 @@ def test_smoke_end_to_end(tmp_path, monkeypatch):
                      client_b=stub_ocr, resolver=_StubResolver())
     assert db.get_status(doc_id) == "reconciled"
 
-    items = phase4_enumerate.run(doc_id, "parties", db=db, settings=s, client=stub_x)
+    items = phase4_enumerate.run(doc_id, "parties", "contract", db=db, settings=s, client=stub_x)
     assert len(items) == 2
-    assert db.get_status(doc_id) == "enumerated"
+    assert db.schema_status(doc_id, "contract") == "enumerated"
 
     phase5_extract.run(doc_id, ContractStrict, db=db, settings=s, client=stub_x)
-    assert db.get_status(doc_id) == "extracted"
+    assert db.schema_status(doc_id, "contract") == "extracted"
     pending = db.get_extractions(doc_id, status="pending")
     assert len(pending) >= 8  # 4 piatti + 2x3 parti (null inclusi) + inventory
     # i task di elemento lista ricevono SOLO le regioni dell'inventario
@@ -169,7 +169,7 @@ def test_smoke_end_to_end(tmp_path, monkeypatch):
     assert all("CONTRATTO N. 44/B" not in p for p in item_prompts)
 
     phase6_validate.run(doc_id, ContractStrict, db=db, settings=s, client=stub_x)
-    assert db.get_status(doc_id) == "validated"
+    assert db.schema_status(doc_id, "contract") == "validated"
 
     validated = {r["field_path"]: r for r in db.get_extractions(doc_id, status="validated")}
     assert json.loads(validated["contract_number"]["value_json"]) == "44/B"
@@ -215,7 +215,7 @@ def test_resume_run_from_needs_review(tmp_path, monkeypatch):
     phase2_ocr_a.run(doc_id, db=db, settings=s, client=_StubOCR())
     phase3_ocr_b.run(doc_id, db=db, settings=s,
                      client_b=_StubOCR(), resolver=_StubResolver())
-    phase4_enumerate.run(doc_id, "parties", db=db, settings=s,
+    phase4_enumerate.run(doc_id, "parties", "contract", db=db, settings=s,
                          client=_StubExtractor())
 
     # primo tentativo: estrattore giù -> needs_review con task fallito
@@ -224,16 +224,16 @@ def test_resume_run_from_needs_review(tmp_path, monkeypatch):
             raise ConnectionError("down")
 
     phase5_extract.run(doc_id, ContractStrict, db=db, settings=s, client=Down())
-    assert db.get_status(doc_id) == "needs_review"
+    assert db.schema_status(doc_id, "contract") == "needs_review"
 
     # rilancio della sequenza completa, come farebbe `run` al resume
     phase1_ingest.rasterize(doc_id, db=db, settings=s)   # skip (needs_review)
     phase2_ocr_a.run(doc_id, db=db, settings=s, client=_StubOCR())   # skip
     phase3_ocr_b.run(doc_id, db=db, settings=s, client_b=_StubOCR(),
                      resolver=_StubResolver())           # skip
-    phase4_enumerate.run(doc_id, "parties", db=db, settings=s,
+    phase4_enumerate.run(doc_id, "parties", "contract", db=db, settings=s,
                          client=_StubExtractor())
     stub_x = _StubExtractor()
     phase5_extract.run(doc_id, ContractStrict, db=db, settings=s, client=stub_x)
     phase6_validate.run(doc_id, ContractStrict, db=db, settings=s, client=stub_x)
-    assert db.get_status(doc_id) == "done"
+    assert db.schema_status(doc_id, "contract") == "done"

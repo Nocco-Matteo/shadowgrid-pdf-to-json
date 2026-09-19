@@ -36,6 +36,16 @@ python -m pipeline.cli eval                    # valutazione sul gold set
 python -m pipeline.cli reorder --doc-id <doc_id>
 ```
 
+Un manuale alimenta **più envelope** del compendium (`raceTraits`,
+`classFeatures`, `raceAsi`, ...). Le fasi 1-3 (OCR) sono comuni al documento;
+dalla Fase 4 in poi estrazioni e stato sono per **(documento, schema)**, quindi
+estrarre un envelope non cancella gli altri. `reset-extraction` azzera solo
+l'envelope di `--schema` (`--all-schemas` per tutti).
+
+L'export è **autonomo dal manuale**: contiene quello che c'è nel libro
+processato, senza ereditare id o sources da un seed curato altrove. La fusione
+con un seed esistente è un passo separato e successivo.
+
 Lo schema di default è `race_traits`: estrae i tratti razziali che cambiano un
 numero e scrive `runs/export/<doc_id>/raceTraits.json` nel formato di
 `seeds/raceTraits.json`, validato contro `schema/compendium.schema.json` (solo

@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, ClassVar, Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -106,37 +106,30 @@ def compendium(def_name: str, description: str) -> Any:
 BASE_WALKING_SPEED = 30
 
 
-class RaceTrait(BaseModel):
-    """Un tratto razziale che cambia un numero del personaggio (raceTraits.json)."""
+# I sei envelope "effetto" del compendium sono UNA forma sola: la base condivisa
+# `featureDefinitionBase` (featureName, grantedAtLevel, effects, ...) più il campo
+# che dice di CHI è la regola — className, raceName, featName, spellName,
+# itemName, backgroundName. Scriverli a mano sei volte significherebbe sei copie
+# dello stesso contratto che divergono a ogni modifica, quindi qui c'è una
+# fabbrica e sei istanze.
 
-    model_config = ConfigDict(extra="forbid")
-
-    raceName: Extracted[str] = Field(description=(
-        "la razza, presa dal titolo '<Razza> Traits' della sezione e MAI spezzata: "
-        "sotto 'HALF-ORC TRAITS' raceName è 'Half-Orc' (non 'Orc'), sotto "
-        "'DRAGONBORN TRAITS' è 'Dragonborn'. Solo quando il tratto sta sotto un "
-        "titolo di SOTTORAZZA quel titolo si divide e raceName è la razza che "
-        "contiene: 'WOOD ELF' -> 'Elf', 'HILL DWARF' -> 'Dwarf', "
-        "'DARK ELF (DROW)' -> 'Elf'; mai il titolo intero. Se il titolo della "
-        "sottorazza è solo un qualificatore ('STOUT', 'LIGHTFOOT') la razza è "
-        "quella della sezione '<Razza> Traits' che lo contiene. "
-        "quote = il titolo da cui la leggi"))
-    subraceName: Extracted[str | None] = Field(
-        default_factory=lambda: Extracted(value=None, quote=None),
-        description=("il qualificatore del titolo della sottorazza, SENZA il nome "
-                     "della razza: 'Hill Dwarf' -> 'Hill', 'Wood Elf' -> 'Wood', "
-                     "'Dark Elf (Drow)' -> 'Dark', 'Stout' -> 'Stout'. Tratto di una "
-                     "razza senza sottorazza: value=null e quote=null"))
-    featureName: Extracted[str] = Field(description=(
-        "nome del tratto come scritto, senza il punto finale (es. 'Dwarven Resilience')"))
-    grantedAtLevel: Extracted[int | None] = Field(
-        default_factory=lambda: Extracted(value=None, quote=None),
-        description=("livello a cui si ottiene il tratto SOLO se il testo lo dice "
-                     "(es. 'when you reach 5th level' -> 5); altrimenti value=null e quote=null"))
-    effects: Extracted[list[dict[str, Any]]] = compendium("featureEffect", (
-        "effetti numerici del tratto nella tassonomia chiusa del compendium "
-        "(resistance, ac_bonus, ac_formula, speed_bonus, hp_bonus_per_level, ...). "
-        "Solo ciò che cambia un numero del personaggio; quote = la frase della regola. "
+_FEATURE_NAME_DESC = (
+    "nome della regola come scritto nel testo, senza il punto finale "
+    "(es. 'Dwarven Resilience')")
+_GRANTED_AT_DESC = (
+    "livello a cui si ottiene SOLO se il testo lo dice (es. 'when you reach "
+    "5th level' -> 5); altrimenti value=null e quote=null")
+_EFFECTS_DESC = (
+        "effetti del tratto nella tassonomia chiusa del compendium. Usa il kind "
+        "che corrisponde alla regola: resistance (resistenze/immunità), "
+        "speed_bonus, hp_bonus_per_level, ac_bonus, ac_formula, "
+        "proficiency_grant (competenze in abilità/strumenti/tiri salvezza), "
+        "spell_grant (incantesimi concessi dal tratto), extra_damage_dice, "
+        "damage_bonus, attack_bonus, save_bonus, initiative_bonus, check_modifier. "
+        "Se la regola non è esprimibile con NESSUNO di questi kind (portata della "
+        "scurovisione, competenza in armi o armature, raddoppio del bonus di "
+        "competenza): value=null e quote=null, non forzarla in un kind che non le "
+        "corrisponde. quote = la frase della regola. "
         f"Velocità: speed_bonus.amount è la differenza da {BASE_WALKING_SPEED} feet "
         f"('35 feet' -> 5, '25 feet' -> -5); una differenza di 0 NON è un effetto, "
         f"ometti l'elemento. "
@@ -146,10 +139,45 @@ class RaceTrait(BaseModel):
         "Vantaggio, competenza e immunità non numeriche NON sono effetti: non "
         "metterli nella lista e non inventare campi per far quadrare lo schema "
         "(meglio nessun effetto che uno inventato). "
-        "Se il tratto non cambia nessun numero: value=null e quote=null"))
+        "Se il tratto non cambia nessun numero: value=null e quote=null")
 
-    @model_validator(mode="after")
-    def effects_match_compendium(self) -> RaceTrait:
+
+def effect_family(
+    *,
+    seed_file: str,
+    list_field: str,
+    list_desc: str,
+    owner: tuple[str, str],
+    sub_owner: tuple[str, str] | None = None,
+    item_name: str,
+    doc_name: str,
+) -> type[BaseModel]:
+    """Costruisce lo schema di estrazione di uno degli envelope "effetto".
+
+    `owner` è (campo, descrizione) di chi possiede la regola; `sub_owner` il suo
+    qualificatore opzionale (sottorazza, sottoclasse). Tutto il resto — nome,
+    livello, effetti nella tassonomia chiusa — è condiviso.
+    """
+    from pydantic import create_model
+
+    def _absent() -> Extracted:
+        return Extracted(value=None, quote=None)
+
+    fields: dict[str, Any] = {
+        owner[0]: (Extracted[str], Field(description=owner[1])),
+    }
+    if sub_owner:
+        fields[sub_owner[0]] = (
+            Extracted[str | None],
+            Field(default_factory=_absent, description=sub_owner[1]),
+        )
+    fields["featureName"] = (Extracted[str], Field(description=_FEATURE_NAME_DESC))
+    fields["grantedAtLevel"] = (
+        Extracted[int | None], Field(default_factory=_absent, description=_GRANTED_AT_DESC))
+    fields["effects"] = (
+        Extracted[list[dict[str, Any]]], compendium("featureEffect", _EFFECTS_DESC))
+
+    def _check_effects(self):
         from .compendium import validate_def
 
         for i, effect in enumerate(self.effects.value or []):
@@ -158,31 +186,180 @@ class RaceTrait(BaseModel):
                 raise ValueError(f"effects[{i}] non valido per il compendium: {errors[:3]}")
         return self
 
+    item = create_model(
+        item_name,
+        __config__=ConfigDict(extra="forbid"),
+        __validators__={"effects_match_compendium": model_validator(mode="after")(_check_effects)},
+        **fields,
+    )
+    item.__doc__ = f"Una regola di {seed_file}: chi la possiede e cosa cambia."
 
-class RaceTraitsDoc(BaseModel):
-    """Schema di estrazione per il seed raceTraits.json del compendium."""
+    doc = create_model(
+        doc_name,
+        __config__=ConfigDict(extra="forbid"),
+        **{list_field: (list[item], Field(default_factory=list, description=list_desc))},
+    )
+    doc.seed_file = seed_file
+    doc.__doc__ = f"Schema di estrazione per il seed {seed_file} del compendium."
+    return doc
 
-    model_config = ConfigDict(extra="forbid")
-    seed_file: ClassVar[str] = "raceTraits.json"
 
-    traits: list[RaceTrait] = Field(default_factory=list, description=(
+RaceTraitsDoc = effect_family(
+    seed_file="raceTraits.json",
+    list_field="traits",
+    item_name="RaceTrait",
+    doc_name="RaceTraitsDoc",
+    owner=("raceName", (
+        "la razza, presa dal titolo '<Razza> Traits' della sezione e MAI spezzata: "
+        "sotto 'HALF-ORC TRAITS' raceName è 'Half-Orc' (non 'Orc'), sotto "
+        "'DRAGONBORN TRAITS' è 'Dragonborn'. Solo quando il tratto sta sotto un "
+        "titolo di SOTTORAZZA quel titolo si divide e raceName è la razza che "
+        "contiene: 'WOOD ELF' -> 'Elf', 'HILL DWARF' -> 'Dwarf', "
+        "'DARK ELF (DROW)' -> 'Elf'; mai il titolo intero. Se il titolo della "
+        "sottorazza è solo un qualificatore ('STOUT', 'LIGHTFOOT') la razza è "
+        "quella della sezione '<Razza> Traits' che lo contiene. "
+        "quote = il titolo da cui la leggi")),
+    sub_owner=("subraceName", (
+        "il qualificatore del titolo della sottorazza, SENZA il nome della razza: "
+        "'Hill Dwarf' -> 'Hill', 'Wood Elf' -> 'Wood', 'Dark Elf (Drow)' -> 'Dark', "
+        "'Stout' -> 'Stout'. Tratto di una razza senza sottorazza: value=null e "
+        "quote=null")),
+    list_desc=(
         "tratti razziali: paragrafi che iniziano con il nome del tratto in grassetto "
         "(es. 'Dwarven Resilience.') nelle sezioni '<Razza> Traits' di razze e "
-        "sottorazze. SOLO tratti che cambiano un numero del personaggio: resistenze o "
-        "immunità ai danni, classe armatura, velocità, punti ferita. ESCLUSI gli "
-        "aumenti di caratteristica ('Ability Score Increase'): non sono tratti, il "
-        "compendium li tiene in un seed separato (raceAsi.json) e li cura a mano. "
-        "Esclusi anche i tratti che danno solo vantaggio o competenza senza un "
-        "numero, e le voci descrittive (Age, Alignment, Size, Languages, Names). "
+        "sottorazze. Prendi OGNI tratto che cambia qualcosa che la scheda calcola: "
+        "resistenze e immunità, velocità, punti ferita, classe armatura, "
+        "competenze (abilità, strumenti, tiri salvezza), incantesimi concessi, "
+        "bonus a tiri per colpire/danni/salvezza/iniziativa, dadi di danno. "
+        "ESCLUSI gli aumenti di caratteristica ('Ability Score Increase'): non "
+        "sono tratti, il compendium li tiene in un seed separato (raceAsi.json). "
+        "Escluse le voci descrittive (Age, Alignment, Size, Languages, Names) e i "
+        "tratti che danno solo vantaggio o svantaggio, che non è un numero. "
         "anchor = il nome del tratto; section = il titolo della razza o sottorazza "
-        "a cui appartiene"))
+        "a cui appartiene"),
+)
+RaceTrait = RaceTraitsDoc.model_fields["traits"].annotation.__args__[0]
 
 
-# Schemi selezionabili dalla CLI (--schema)
+ClassFeaturesDoc = effect_family(
+    seed_file="classFeatures.json",
+    list_field="features",
+    item_name="ClassFeature",
+    doc_name="ClassFeaturesDoc",
+    owner=("className", (
+        "la classe a cui appartiene la capacità, dal titolo del capitolo o della "
+        "tabella della classe (es. 'Barbarian', 'Bard'). Una capacità sotto un "
+        "titolo di SOTTOCLASSE resta della classe base: className è 'Barbarian' e "
+        "il nome della sottoclasse va in subclassName. quote = il titolo da cui "
+        "la leggi")),
+    sub_owner=("subclassName", (
+        "la sottoclasse ('Path of the Berserker', 'College of Lore') se la "
+        "capacità è sua; per una capacità della classe base value=null e "
+        "quote=null")),
+    list_desc=(
+        "capacità di classe. Nei capitoli delle classi NON sono paragrafi che "
+        "iniziano col nome in grassetto: ogni capacità è una RIGA A SÉ con il suo "
+        "nome, quasi sempre in maiuscolo ('RAGE', 'UNARMORED DEFENSE', 'RECKLESS "
+        "ATTACK'), seguita dai paragrafi che la descrivono fino alla riga-titolo "
+        "successiva. L'anchor è quella riga-titolo, e va presa anche quando il "
+        "titolo da solo non dice cosa fa: il corpo della regola viene raccolto a "
+        "parte. Prendi OGNI capacità che cambia qualcosa che la scheda calcola: "
+        "bonus a tiri per colpire, danni, CA, velocità, punti ferita, competenze, "
+        "incantesimi concessi, dadi di danno, attacchi extra. Escluse le "
+        "intestazioni che non sono capacità ('CLASS FEATURES', 'PROFICIENCIES', "
+        "'EQUIPMENT', 'CREATING A ...', 'Quick Build'), le tabelle di "
+        "progressione e il testo narrativo. "
+        "anchor = la riga-titolo della capacità; section = il titolo della classe "
+        "('THE BARBARIAN') o della sottoclasse ('PATH OF THE BERSERKER')"),
+)
+ClassFeature = ClassFeaturesDoc.model_fields["features"].annotation.__args__[0]
+
+FeatEffectsDoc = effect_family(
+    seed_file="featEffects.json",
+    list_field="feats",
+    item_name="FeatEffect",
+    doc_name="FeatEffectsDoc",
+    owner=("featName", (
+        "il nome del talento come scritto nel titolo della sua voce "
+        "(es. 'Alert', 'Mobile'). quote = quel titolo")),
+    list_desc=(
+        "talenti: le voci del capitolo dei talenti. Prendi OGNI talento che "
+        "cambia un numero della scheda (iniziativa, velocità, punti ferita, CA, "
+        "competenze, tiri salvezza). anchor = il nome del talento; "
+        "section = il titolo del capitolo"),
+)
+FeatEffect = FeatEffectsDoc.model_fields["feats"].annotation.__args__[0]
+
+SpellEffectsDoc = effect_family(
+    seed_file="spellEffects.json",
+    list_field="spells",
+    item_name="SpellEffect",
+    doc_name="SpellEffectsDoc",
+    owner=("spellName", (
+        "il nome dell'incantesimo come scritto nel titolo della sua voce "
+        "(es. 'Barkskin'). quote = quel titolo")),
+    list_desc=(
+        "incantesimi che cambiano un numero DEL PERSONAGGIO mentre sono attivi "
+        "(Mage Armor sostituisce la CA senza armatura, Barkskin le impone un "
+        "minimo). NON i danni propri dell'incantesimo, che stanno in spells.json: "
+        "qui va solo ciò che modifica la scheda di chi lo subisce o lo riceve. "
+        "anchor = il nome dell'incantesimo; section = il livello o la scuola"),
+)
+SpellEffect = SpellEffectsDoc.model_fields["spells"].annotation.__args__[0]
+
+ItemFeaturesDoc = effect_family(
+    seed_file="itemFeatures.json",
+    list_field="items",
+    item_name="ItemFeature",
+    doc_name="ItemFeaturesDoc",
+    owner=("itemName", (
+        "il nome dell'oggetto magico come scritto nel titolo della sua voce "
+        "(es. 'Cloak of Protection'). quote = quel titolo")),
+    list_desc=(
+        "oggetti magici che cambiano un numero della scheda di chi li indossa o "
+        "impugna (CA, tiri salvezza, tiri per colpire, danni, velocità). Esclusi "
+        "gli oggetti puramente narrativi e quelli il cui unico effetto è un "
+        "incantesimo lanciabile a comando. anchor = il nome dell'oggetto; "
+        "section = la categoria (Wondrous Item, Weapon, ...)"),
+)
+ItemFeature = ItemFeaturesDoc.model_fields["items"].annotation.__args__[0]
+
+BackgroundFeaturesDoc = effect_family(
+    seed_file="backgroundFeatures.json",
+    list_field="backgrounds",
+    item_name="BackgroundFeature",
+    doc_name="BackgroundFeaturesDoc",
+    owner=("backgroundName", (
+        "il nome del background come scritto nel titolo della sua voce "
+        "(es. 'Acolyte', 'Failed Merchant'). quote = quel titolo")),
+    list_desc=(
+        "background: le voci del capitolo dei background. Prendi ciò che cambia "
+        "un numero della scheda — quasi sempre le competenze concesse in abilità "
+        "e strumenti (proficiency_grant). Escluse le voci narrative "
+        "(caratteristiche suggerite, legami, difetti) e l'equipaggiamento "
+        "iniziale. anchor = il nome del background; section = il titolo del "
+        "capitolo"),
+)
+BackgroundFeature = BackgroundFeaturesDoc.model_fields["backgrounds"].annotation.__args__[0]
+
+
 SCHEMAS: dict[str, type[BaseModel]] = {
     "race_traits": RaceTraitsDoc,
+    "class_features": ClassFeaturesDoc,
+    "feat_effects": FeatEffectsDoc,
+    "spell_effects": SpellEffectsDoc,
+    "item_features": ItemFeaturesDoc,
+    "background_features": BackgroundFeaturesDoc,
     "contract": ContractStrict,
 }
+
+
+def schema_name_of(model: type[BaseModel]) -> str:
+    """Nome registrato dello schema (la chiave in SCHEMAS).
+
+    Identifica l'envelope di destinazione: le estrazioni e lo stato sono per
+    (documento, schema), perché lo stesso manuale ne alimenta molti."""
+    return next((k for k, v in SCHEMAS.items() if v is model), model.__name__)
 
 
 # ---------------------------------------------------------------------------

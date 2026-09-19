@@ -28,6 +28,10 @@ STATES = [
 ]
 TERMINAL_ALT = {"needs_review", "failed"}
 
+# Stati in cui l'OCR del documento è concluso: da qui in poi il progresso è
+# per envelope, non per documento.
+_OCR_DONE = {"reconciled", "enumerated", "extracted", "validated", "done", "needs_review"}
+
 # Archi ammessi (src -> dst)
 EDGES: dict[str, set[str]] = {
     "ingested": {"rasterized"},
@@ -89,6 +93,7 @@ CREATE TABLE IF NOT EXISTS region_conflicts(
 );
 CREATE TABLE IF NOT EXISTS extractions(
   doc_id TEXT NOT NULL,
+  schema_name TEXT,     -- envelope di destinazione: un manuale ne alimenta molti
   field_path TEXT NOT NULL,
   value_json TEXT,
   quote TEXT,
@@ -102,11 +107,23 @@ CREATE TABLE IF NOT EXISTS extractions(
 CREATE INDEX IF NOT EXISTS idx_extractions_doc ON extractions(doc_id);
 CREATE TABLE IF NOT EXISTS tasks(
   doc_id TEXT NOT NULL,
+  schema_name TEXT,
   task_name TEXT NOT NULL,
   status TEXT NOT NULL,  -- ok|failed
   error TEXT,
   updated_at REAL NOT NULL,
   PRIMARY KEY (doc_id, task_name)
+);
+-- Stato dell'ESTRAZIONE, per (documento, schema). Le fasi 1-3 (OCR) sono
+-- comuni al documento e restano in documents.status; dalla Fase 4 in poi ogni
+-- envelope avanza per conto suo, perché lo stesso manuale ne alimenta molti e
+-- il progresso su raceTraits non dice niente su classFeatures.
+CREATE TABLE IF NOT EXISTS extraction_state(
+  doc_id TEXT NOT NULL,
+  schema_name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  updated_at REAL NOT NULL,
+  PRIMARY KEY (doc_id, schema_name)
 );
 CREATE TABLE IF NOT EXISTS runs(
   run_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,6 +153,8 @@ class DB:
             "ALTER TABLE pages ADD COLUMN canonical_text TEXT",
             "ALTER TABLE pages ADD COLUMN ocr_b_done INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE regions ADD COLUMN text_canonical TEXT",
+            "ALTER TABLE extractions ADD COLUMN schema_name TEXT",
+            "ALTER TABLE tasks ADD COLUMN schema_name TEXT",
         ):
             try:
                 self.conn.execute(ddl)
@@ -193,22 +212,70 @@ class DB:
                     f"Impossibile transire {src}->{dst}: doc {doc_id} non in stato {src}"
                 )
 
+    # --- stato dell'estrazione, per (documento, schema) -------------------
+    # Gli stati sono gli stessi di STATES da `reconciled` in poi, ma valgono
+    # per un solo envelope: `raceTraits` può essere `done` mentre
+    # `classFeatures` non è ancora partito sullo stesso manuale.
+    def schema_status(self, doc_id: str, schema_name: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT status FROM extraction_state WHERE doc_id=? AND schema_name=?",
+            (doc_id, schema_name),
+        ).fetchone()
+        if row:
+            return row["status"]
+        # nessuna estrazione ancora avviata: conta se l'OCR è finito
+        doc = self.get_status(doc_id)
+        return "reconciled" if doc in _OCR_DONE else doc
+
+    def set_schema_status(self, doc_id: str, schema_name: str, dst: str) -> None:
+        with self.tx() as cur:
+            cur.execute(
+                """INSERT INTO extraction_state(doc_id, schema_name, status, updated_at)
+                   VALUES(?,?,?,?)
+                   ON CONFLICT(doc_id, schema_name) DO UPDATE SET
+                     status=excluded.status, updated_at=excluded.updated_at""",
+                (doc_id, schema_name, dst, time.time()),
+            )
+
+    def transition_schema(self, doc_id: str, schema_name: str, src: str, dst: str) -> None:
+        if dst not in EDGES.get(src, set()):
+            raise ValueError(f"Transizione non ammessa: {src} -> {dst}")
+        cur_st = self.schema_status(doc_id, schema_name)
+        if cur_st != src:
+            raise ValueError(
+                f"Impossibile transire {src}->{dst}: {doc_id}/{schema_name} in stato {cur_st}"
+            )
+        self.set_schema_status(doc_id, schema_name, dst)
+
     def set_status(self, doc_id: str, dst: str) -> None:
         # Forza lo stato (usato per needs_review/failed)
         with self.tx() as cur:
             cur.execute("UPDATE documents SET status=? WHERE doc_id=?", (dst, doc_id))
 
-    def reset_extraction(self, doc_id: str) -> None:
-        """Cancella inventari, estrazioni ed esiti dei task e riporta il
-        documento a `reconciled`: si riestrae (es. con un altro schema) senza
-        rifare rasterizzazione e OCR."""
+    def reset_extraction(self, doc_id: str, schema_name: str | None = None) -> None:
+        """Cancella inventari, estrazioni ed esiti dei task e riporta
+        l'estrazione a `reconciled`, senza rifare rasterizzazione e OCR.
+
+        Con `schema_name` azzera SOLO quell'envelope: gli altri estratti dallo
+        stesso manuale restano dove sono. Senza, azzera tutto il documento."""
         st = self.get_status(doc_id)
-        if st not in {"reconciled", "enumerated", "extracted", "validated", "done", "needs_review"}:
+        if st not in _OCR_DONE:
             raise ValueError(f"Reset estrazione: {doc_id} in stato {st}, OCR non completato")
         with self.tx() as cur:
-            cur.execute("DELETE FROM extractions WHERE doc_id=?", (doc_id,))
-            cur.execute("DELETE FROM tasks WHERE doc_id=?", (doc_id,))
-            cur.execute("UPDATE documents SET status='reconciled' WHERE doc_id=?", (doc_id,))
+            if schema_name:
+                cur.execute("DELETE FROM extractions WHERE doc_id=? AND schema_name=?",
+                            (doc_id, schema_name))
+                cur.execute("DELETE FROM tasks WHERE doc_id=? AND schema_name=?",
+                            (doc_id, schema_name))
+                cur.execute("DELETE FROM extraction_state WHERE doc_id=? AND schema_name=?",
+                            (doc_id, schema_name))
+            else:
+                cur.execute("DELETE FROM extractions WHERE doc_id=?", (doc_id,))
+                cur.execute("DELETE FROM tasks WHERE doc_id=?", (doc_id,))
+                cur.execute("DELETE FROM extraction_state WHERE doc_id=?", (doc_id,))
+            cur.execute("UPDATE documents SET status='reconciled' WHERE doc_id=? "
+                        "AND status NOT IN ('ingested','rasterized','ocr_a','ocr_b','failed')",
+                        (doc_id,))
 
     def get_pending(self, status: str) -> list[sqlite3.Row]:
         return self.conn.execute(
@@ -519,30 +586,36 @@ class DB:
         attempt: int,
         status: str,
         confidence: str | None = None,
+        schema_name: str | None = None,
     ) -> None:
         with self.tx() as cur:
             cur.execute(
-                """INSERT INTO extractions(doc_id, field_path, value_json, quote, page_no, bbox,
-                                           attempt, status, confidence)
-                   VALUES(?,?,?,?,?,?,?,?,?)
+                """INSERT INTO extractions(doc_id, schema_name, field_path, value_json,
+                                           quote, page_no, bbox, attempt, status, confidence)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(doc_id, field_path, attempt) DO UPDATE SET
                      value_json=excluded.value_json, quote=excluded.quote,
                      page_no=excluded.page_no, bbox=excluded.bbox,
-                     status=excluded.status, confidence=excluded.confidence""",
-                (doc_id, field_path, value_json, quote, page_no,
+                     status=excluded.status, confidence=excluded.confidence,
+                     schema_name=COALESCE(excluded.schema_name, extractions.schema_name)""",
+                (doc_id, schema_name, field_path, value_json, quote, page_no,
                  json.dumps(bbox) if bbox else None, attempt, status, confidence),
             )
 
-    def get_extractions(self, doc_id: str, status: str | None = None) -> list[sqlite3.Row]:
+    def get_extractions(self, doc_id: str, status: str | None = None,
+                        schema_name: str | None = None) -> list[sqlite3.Row]:
+        """Estrazioni del documento. `schema_name` le restringe a un envelope:
+        senza filtro si mescolerebbero i tratti razziali con le feature di
+        classe e nessuno dei due schemi accetterebbe il documento."""
+        sql = "SELECT * FROM extractions WHERE doc_id=?"
+        args: list[Any] = [doc_id]
         if status:
-            return self.conn.execute(
-                "SELECT * FROM extractions WHERE doc_id=? AND status=? ORDER BY field_path, attempt",
-                (doc_id, status),
-            ).fetchall()
-        return self.conn.execute(
-            "SELECT * FROM extractions WHERE doc_id=? ORDER BY field_path, attempt",
-            (doc_id,),
-        ).fetchall()
+            sql += " AND status=?"
+            args.append(status)
+        if schema_name:
+            sql += " AND schema_name=?"
+            args.append(schema_name)
+        return self.conn.execute(sql + " ORDER BY field_path, attempt", args).fetchall()
 
     def latest_extraction(self, doc_id: str, field_path: str) -> sqlite3.Row | None:
         return self.conn.execute(
@@ -550,10 +623,11 @@ class DB:
             (doc_id, field_path),
         ).fetchone()
 
-    def latest_extractions(self, doc_id: str) -> list[sqlite3.Row]:
+    def latest_extractions(self, doc_id: str,
+                           schema_name: str | None = None) -> list[sqlite3.Row]:
         """Per ogni field_path, solo il tentativo più recente."""
         latest: dict[str, sqlite3.Row] = {}
-        for r in self.get_extractions(doc_id):
+        for r in self.get_extractions(doc_id, schema_name=schema_name):
             cur = latest.get(r["field_path"])
             if cur is None or r["attempt"] > cur["attempt"]:
                 latest[r["field_path"]] = r
@@ -561,16 +635,18 @@ class DB:
 
     # --- tasks (esito persistito dei task di estrazione) --------------------
     def record_task(
-        self, doc_id: str, task_name: str, status: str, error: str | None = None
+        self, doc_id: str, task_name: str, status: str, error: str | None = None,
+        schema_name: str | None = None,
     ) -> None:
         with self.tx() as cur:
             cur.execute(
-                """INSERT INTO tasks(doc_id, task_name, status, error, updated_at)
-                   VALUES(?,?,?,?,?)
+                """INSERT INTO tasks(doc_id, schema_name, task_name, status, error, updated_at)
+                   VALUES(?,?,?,?,?,?)
                    ON CONFLICT(doc_id, task_name) DO UPDATE SET
                      status=excluded.status, error=excluded.error,
-                     updated_at=excluded.updated_at""",
-                (doc_id, task_name, status, (error or "")[:500], time.time()),
+                     updated_at=excluded.updated_at,
+                     schema_name=COALESCE(excluded.schema_name, tasks.schema_name)""",
+                (doc_id, schema_name, task_name, status, (error or "")[:500], time.time()),
             )
 
     def task_status(self, doc_id: str, task_name: str) -> str | None:
@@ -580,7 +656,13 @@ class DB:
         ).fetchone()
         return row["status"] if row else None
 
-    def failed_tasks(self, doc_id: str) -> list[sqlite3.Row]:
+    def failed_tasks(self, doc_id: str,
+                     schema_name: str | None = None) -> list[sqlite3.Row]:
+        if schema_name:
+            return self.conn.execute(
+                "SELECT * FROM tasks WHERE doc_id=? AND schema_name=? AND status!='ok'",
+                (doc_id, schema_name),
+            ).fetchall()
         return self.conn.execute(
             "SELECT * FROM tasks WHERE doc_id=? AND status!='ok'", (doc_id,)
         ).fetchall()

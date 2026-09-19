@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import re
 import sys
 from pathlib import Path
 
@@ -51,28 +50,14 @@ def _list_fields(schema, args) -> list[tuple[str, str | None]]:
             for n in names]
 
 
-def _same_schema(doc_id: str, schema, db: DB) -> bool:
-    """False (con errore esplicito) se il documento ha estrazioni di un altro
-    schema: mescolarle darebbe un documento che nessuno dei due schemi accetta."""
-    fields = {re.split(r"[.\[$]", r["field_path"], maxsplit=1)[0]
-              for r in db.get_extractions(doc_id)}
-    foreign = sorted(fields - set(schema.model_fields))
-    if foreign:
-        log.error("%s ha estrazioni di un altro schema (%s): documento saltato. "
-                  "Per riestrarlo con --schema %s (OCR conservato): "
-                  "python -m pipeline.cli reset-extraction --doc-id %s",
-                  doc_id, ", ".join(foreign[:5]), _schema_name(schema), doc_id)
-        return False
-    return True
-
-
 def _schema_name(schema) -> str:
     return next((k for k, v in SCHEMAS.items() if v is schema), schema.__name__)
 
 
 def _enumerate(doc_id: str, schema, args, db: DB, s) -> None:
+    name = _schema_name(schema)
     for lf, desc in _list_fields(schema, args):
-        phase4_enumerate.run(doc_id, lf, db=db, settings=s, description=desc)
+        phase4_enumerate.run(doc_id, lf, name, db=db, settings=s, description=desc)
 
 
 def export_doc(doc_id: str, schema, db: DB, s, sources: list[str]) -> Path | None:
@@ -84,10 +69,15 @@ def export_doc(doc_id: str, schema, db: DB, s, sources: list[str]) -> Path | Non
     if not sources:
         log.error("Export %s: manca --source (codice del libro, es. players_handbook)", doc_id)
         return None
-    doc = phase6_validate._build_document(db.get_extractions(doc_id, status="validated"))
-    seed_path = compendium.DEFAULT_SCHEMA_PATH.parents[1] / "seeds" / seed_file
-    seed = json.loads(seed_path.read_text(encoding="utf-8")) if seed_path.exists() else None
-    envelope, notes = compendium.export_race_traits(doc, sources, seed)
+    name = _schema_name(schema)
+    doc = phase6_validate._build_document(
+        db.get_extractions(doc_id, status="validated", schema_name=name))
+    # Envelope AUTONOMO: quello che c'è nel manuale, e basta. La fusione con un
+    # seed esistente (riuso degli id, unione delle sources) è un passo separato
+    # e successivo: farla qui significherebbe far entrare nell'estrazione le
+    # scelte di un lavoro a mano incompleto, e non poter più dire quale delle
+    # due l'ha prodotta.
+    envelope, notes = compendium.export_race_traits(doc, sources)
     errors = compendium.validate_envelope(envelope, seed_file)
     out_dir = Path(s.work_dir).parent / "export" / doc_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -167,8 +157,6 @@ def cmd_enumerate(args) -> None:
     s.extractor_url = url
     try:
         for doc_id in _resolve_doc_ids(args, db):
-            if not _same_schema(doc_id, _schema(args), db):
-                continue
             _enumerate(doc_id, _schema(args), args, db, s)
     finally:
         runner.stop()
@@ -182,8 +170,6 @@ def cmd_extract(args) -> None:
     s.extractor_url = url
     try:
         for doc_id in _resolve_doc_ids(args, db):
-            if not _same_schema(doc_id, _schema(args), db):
-                continue
             phase5_extract.run(doc_id, _schema(args), db=db, settings=s)
     finally:
         runner.stop()
@@ -199,8 +185,6 @@ def cmd_validate(args) -> None:
     s.extractor_url = runner.start_extractor(port=8080, phase="extract")
     try:
         for doc_id in _resolve_doc_ids(args, db):
-            if not _same_schema(doc_id, _schema(args), db):
-                continue
             phase6_validate.run(doc_id, _schema(args), db=db, settings=s)
     finally:
         runner.stop()
@@ -273,7 +257,6 @@ def cmd_run(args) -> None:
     # Enumerate + Extract + Validate (stesso modello: un solo avvio del server).
     # La validazione avviene con il server ancora attivo: i retry di Fase 6
     # rilanciano l'estrattore via HTTP.
-    doc_ids = [d for d in doc_ids if _same_schema(d, schema, db)]
     if not doc_ids:
         return
     s.extractor_url = runner.start_extractor(port=8080, phase="extract")
@@ -329,17 +312,21 @@ def cmd_reorder(args) -> None:
 
 def cmd_reset_extraction(args) -> None:
     db = DB()
+    # Di default azzera SOLO l'envelope scelto: lo stesso manuale ne alimenta
+    # molti, e rifare i tratti razziali non deve buttare via le feature di
+    # classe già estratte dalle stesse pagine.
+    name = None if args.all_schemas else _schema_name(_schema(args))
     for doc_id in _resolve_doc_ids(args, db):
-        db.reset_extraction(doc_id)
-        log.info("Estrazione azzerata per %s: stato reconciled (OCR conservato)", doc_id)
+        db.reset_extraction(doc_id, schema_name=name)
+        log.info("Estrazione azzerata per %s (%s): stato reconciled, OCR conservato",
+                 doc_id, name or "TUTTI gli envelope")
 
 
 def cmd_export(args) -> None:
     s = get_settings()
     db = DB(s)
     for doc_id in _resolve_doc_ids(args, db):
-        if _same_schema(doc_id, _schema(args), db):
-            export_doc(doc_id, _schema(args), db, s, args.sources or s.source_codes)
+        export_doc(doc_id, _schema(args), db, s, args.sources or s.source_codes)
 
 
 def _resolve_doc_ids(args, db: DB) -> list[str]:
@@ -435,8 +422,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_reorder)
 
     sp = sub.add_parser("reset-extraction",
-                        help="cancella estrazioni/task e torna a reconciled (OCR conservato)")
+                        help="cancella estrazioni/task di UN envelope e torna a "
+                             "reconciled (OCR conservato)")
     add_targets(sp)
+    sp.add_argument("--all-schemas", action="store_true",
+                    help="azzera TUTTI gli envelope del documento, non solo --schema")
     sp.set_defaults(func=cmd_reset_extraction)
 
     sp = sub.add_parser("export", help="scrive il seed del compendium dagli elementi validati")

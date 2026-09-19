@@ -7,7 +7,6 @@ Server vLLM sostituiti da no-op: qui si verifica il cablaggio, non i modelli."""
 from __future__ import annotations
 
 import json
-import logging
 import re
 
 import pytest
@@ -160,33 +159,48 @@ def test_cli_run_race_traits_end_to_end(pipeline_env):
     from pipeline.db import DB
     db = DB()
     doc_id = out.parent.name
-    assert db.get_status(doc_id) == "validated"
+    assert db.schema_status(doc_id, "race_traits") == "validated"
     assert len(db.get_pages(doc_id)) == 3
     assert all(p["deskew_angle"] == 0.0 for p in db.get_pages(doc_id))  # pagina dritta
     # nessun campo del contratto: lo schema usato è davvero quello del compendium
     assert all(r["field_path"].startswith("traits") for r in db.get_extractions(doc_id))
 
 
-def test_cli_run_refuses_mixed_schema_until_reset(pipeline_env, caplog):
+def test_two_envelopes_coexist_on_one_document(pipeline_env):
+    """Un manuale alimenta PIÙ envelope: le estrazioni sono separate per
+    schema, quindi estrarne uno non cancella l'altro.
+
+    Prima le estrazioni erano tutte del documento e un guard rifiutava il
+    secondo schema: per prendere le feature di classe dal Player's Handbook
+    bisognava fare `reset-extraction`, che buttava via i tratti razziali
+    appena estratti. Con 16 envelope da riempire era il primo muro."""
     tmp_path, pdf = pipeline_env
     from pipeline import phase1_ingest
     from pipeline.db import DB
 
+    assert cli.main(["run", str(pdf), "--source", "players_handbook"]) == 0
     db = DB()
     doc_id = phase1_ingest.ingest(pdf, db=db)
-    # estrazione precedente con lo schema del contratto (come sul PDF vero)
-    cli.main(["--schema", "race_traits", "rasterize", str(pdf)])
-    db.upsert_extraction(doc_id, "contract_number", '"44/B"', "x", 1, None, 1, "needs_review")
+    assert db.schema_status(doc_id, "race_traits") == "validated"
 
-    with caplog.at_level(logging.ERROR):
-        cli.main(["run", str(pdf), "--source", "players_handbook"])
-    assert "reset-extraction --doc-id " + doc_id in caplog.text
-    assert not (tmp_path / "runs" / "export").exists()
+    # un secondo envelope sullo stesso documento, senza toccare il primo
+    db.upsert_extraction(doc_id, "contract_number", '"44/B"', "x", 1, None, 1,
+                         "needs_review", schema_name="contract")
+    db.set_schema_status(doc_id, "contract", "needs_review")
 
-    cli.main(["reset-extraction", "--doc-id", doc_id])
-    cli.main(["run", str(pdf), "--source", "players_handbook"])
-    envelope, _ = _export(tmp_path)
-    assert len(envelope["definitions"]) == 2
+    race = db.get_extractions(doc_id, schema_name="race_traits")
+    contract = db.get_extractions(doc_id, schema_name="contract")
+    assert race and contract
+    assert not {r["field_path"] for r in race} & {r["field_path"] for r in contract}
+    assert db.schema_status(doc_id, "race_traits") == "validated"
+
+    # e azzerarne uno lascia in piedi l'altro
+    db.reset_extraction(doc_id, schema_name="contract")
+    assert db.get_extractions(doc_id, schema_name="contract") == []
+    assert len(db.get_extractions(doc_id, schema_name="race_traits")) == len(race)
+    assert db.schema_status(doc_id, "race_traits") == "validated"
+    assert db.schema_status(doc_id, "contract") == "reconciled"
+    db.close()
 
 
 def test_cli_run_skips_ocr_servers_when_already_ocred(pipeline_env, monkeypatch):

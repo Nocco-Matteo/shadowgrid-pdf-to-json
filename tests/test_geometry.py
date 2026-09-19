@@ -157,3 +157,37 @@ def test_reading_order_phb_page16_hill_vs_mountain_dwarf():
                                                   page_height=3300)]
     assert order == [457, 459, 460, 462, 461, 463]
     assert order.index(462) < order.index(461)  # Toughness sotto HILL DWARF
+
+
+def test_empty_region_does_not_weld_two_columns():
+    """Regressione dal Player's Handbook p.41 (apertura del capitolo Barbarian).
+
+    Una regione SENZA TESTO larga il 58,8% della pagina — appena sotto la soglia
+    di spanner — cominciava dove finiva la colonna sinistra e arrivava in fondo
+    alla destra. Nel raggruppamento per sovrapposizione orizzontale faceva da
+    ponte: le due colonne diventavano una, la pagina veniva ordinata per y e il
+    testo usciva interlacciato ('Quick Build' in mezzo alla colonna sinistra).
+
+    Nel PHB le regioni vuote sono 402 su 9.535: ognuna è un ponte potenziale.
+    """
+    boxes = [
+        (176, 200, 1139, 260),    # 0 sinistra
+        (1139, 3, 2515, 60),      # 1 VUOTA, scavalca il corridoio
+        (180, 2206, 1115, 2280),  # 2 sinistra
+        (1228, 1994, 1518, 2040),  # 3 destra
+        (1223, 2049, 2161, 2140),  # 4 destra
+    ]
+    flow = [True, False, True, True, True]
+    order = reading_order(boxes, page_height=3300, in_flow=flow)
+    assert order.index(0) < order.index(2) < order.index(3), "colonne interlacciate"
+    assert order.index(2) < order.index(3), "la sinistra va chiusa prima della destra"
+    assert order[-1] == 1, "la regione senza testo va in coda, non nel flusso"
+
+    # senza in_flow il ponte fa ancora danno: è il comportamento che si correggeva
+    assert reading_order(boxes, page_height=3300) != order
+
+
+def test_in_flow_ignored_when_everything_has_text():
+    boxes = [(0, 0, 100, 20), (0, 60, 100, 80), (0, 30, 100, 50)]
+    assert (reading_order(boxes, in_flow=[True, True, True])
+            == reading_order(boxes) == [0, 2, 1])

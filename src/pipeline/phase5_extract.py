@@ -27,7 +27,13 @@ from pydantic import BaseModel
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
-from .schema import _list_inner_type, field_anchors, flatten_extracted, guided_schema
+from .schema import (
+    _list_inner_type,
+    field_anchors,
+    flatten_extracted,
+    guided_schema,
+    schema_name_of,
+)
 from .text_norm import normalize
 
 log = logging.getLogger(__name__)
@@ -54,6 +60,85 @@ def _regions_payload(db: DB, doc_id: str, page_no: int) -> list[dict]:
          "type": r["region_type"], "page": page_no}
         for r in db.get_canonical_regions(doc_id, page_no)
     ]
+
+
+def _item_span(
+    db: DB, doc_id: str, item: dict, nxt: dict | None, budget: int
+) -> list[dict]:
+    """Regioni dell'elemento: dalla sua anchor fino a dove comincia il prossimo.
+
+    Con gli elementi a INTESTAZIONE (le capacità di classe: una riga 'RAGE' e
+    poi i paragrafi) l'elemento non è una regione sola. Prendendo solo l'anchor
+    più un margine si perde il corpo della regola: per Rage restavano fuori il
+    bonus ai danni, la resistenza e la durata, cioè tutti i numeri.
+
+    Il confine non va indovinato: l'inventario della Fase 4 è ordinato, quindi
+    ogni elemento finisce dove comincia il successivo. Attraversa le pagine,
+    perché una capacità che inizia in fondo a una pagina continua sulla dopo.
+    """
+    start_page, ids = item.get("page"), item.get("region_ids") or []
+    if not start_page or not ids:
+        return []
+    end_page = (nxt or {}).get("page") or start_page
+    end_ids = set((nxt or {}).get("region_ids") or [])
+    out: list[dict] = []
+    spent = 0
+    for page_no in range(start_page, max(start_page, end_page) + 1):
+        regions = _regions_payload(db, doc_id, page_no)
+        started = page_no > start_page
+        for r in regions:
+            if not started:
+                if r["region_id"] not in ids:
+                    continue
+                started = True
+            if r["region_id"] in end_ids:
+                return out
+            size = len(r["text"] or "")
+            if spent + size > budget:
+                log.info("Elemento %r: contesto troncato al budget di %d caratteri",
+                         item.get("anchor"), budget)
+                return out
+            out.append(r)
+            spent += size
+    return out
+
+
+def _with_page_tables(
+    regions: list[dict], db: DB, doc_id: str, pages: list[int | None], budget: int
+) -> list[dict]:
+    """Aggiunge al contesto dell'elemento le TABELLE delle sue pagine.
+
+    Il contesto di un elemento è il suo paragrafo: per un tratto razziale basta,
+    perché è autosufficiente. Per tutto il resto no — il manuale mette la regola
+    nella prosa e il numero in una tabella ("as shown in the Rage Damage column
+    of the Barbarian table"). Senza la tabella l'estrattore non ha il numero, e
+    non avendolo risponde `value=null`: un'assenza dichiarata, che i cancelli
+    accettano e le note registrano come esclusione ragionevole. Si perde il dato
+    senza che niente lo segnali.
+
+    Nella run 5 Dragonborn/Damage Resistance è finito così: la tabella Draconic
+    Ancestry era la regione 721 della STESSA pagina del tratto, e il prompt
+    conteneva solo la regione 728.
+
+    L'inclusione è deterministica e non lasciata al modello: l'enumeratore la
+    tabella la vedeva già nel suo elenco di regioni e non l'ha selezionata.
+    """
+    have = {r["region_id"] for r in regions}
+    added: list[dict] = []
+    spent = 0
+    for page_no in dict.fromkeys(p for p in pages if p):  # ordine, senza doppioni
+        for r in _regions_payload(db, doc_id, page_no):
+            if r["type"] != "table" or r["region_id"] in have:
+                continue
+            size = len(r["text"] or "")
+            if spent + size > budget:
+                log.info("Tabella p.%s id=%s (%d caratteri) fuori budget di contesto",
+                         page_no, r["region_id"], size)
+                continue
+            added.append(r)
+            have.add(r["region_id"])
+            spent += size
+    return regions + added
 
 
 def _field_page(db: DB, doc_id: str, pages, labels: list[str]) -> int | None:
@@ -154,7 +239,11 @@ def build_tasks(
         for i, it in enumerate(items):
             page_no = it.get("page")
             page_regions = _regions_payload(db, doc_id, page_no) if page_no else []
-            regions = _select_by_ids(page_regions, it.get("region_ids") or [])
+            # l'elemento arriva fino all'inizio del successivo; se l'inventario
+            # non basta a delimitarlo si ricade sull'anchor più un margine
+            regions = (_item_span(db, doc_id, it, items[i + 1] if i + 1 < len(items) else None,
+                                  s.item_span_chars)
+                       or _select_by_ids(page_regions, it.get("region_ids") or []))
             section, section_page = it.get("section"), it.get("section_page")
             if section and section_page:
                 # titolo della sezione (es. la razza): serve per i campi che
@@ -164,6 +253,10 @@ def build_tasks(
                 ids = {r["region_id"] for r in regions}
                 if len(heading) == 1 and heading[0]["region_id"] not in ids:
                     regions = heading + regions
+            # il numero della regola sta spesso in una tabella della pagina,
+            # non nel paragrafo: senza, l'estrattore dichiara un'assenza
+            regions = _with_page_tables(regions, db, doc_id, [page_no, section_page],
+                                        s.item_table_context_chars)
             tasks.append(Task(
                 name=f"{lf}[{i}]",
                 fields=[lf],
@@ -258,6 +351,14 @@ def build_prompt(task: Task) -> str:
     lines.append("- quote DEVE essere copiata carattere per carattere dal testo fornito sopra.")
     lines.append("- null è la risposta corretta quando il dato non è presente: "
                  "restituisci value=null E quote=null in quel caso.")
+    # Il manuale mette la regola nella prosa e il numero in tabella; le tabelle
+    # della pagina sono ora nel contesto, ma il modello va detto che può usarle:
+    # altrimenti cerca il numero solo nel paragrafo e dichiara un'assenza.
+    lines.append("- se la regola rimanda a una tabella ('as shown in the ... table', "
+                 "'determined by ... as shown in the table'), il valore lo leggi "
+                 "nella regione di tipo `table` qui sopra, e la quote è la riga di "
+                 "quella tabella. Il dato c'è: non rispondere null perché non è nel "
+                 "paragrafo.")
     lines.append(
         "- confidence riguarda l'INFERENZA, non la leggibilità: 'high' solo se il "
         "valore si legge nella quote senza interpretare. Usa 'low' se hai dedotto, "
@@ -276,9 +377,10 @@ def run(
 ) -> None:
     s = settings or get_settings()
     db = db or DB(s)
-    st = db.get_status(doc_id)
+    name = schema_name_of(schema_strict)
+    st = db.schema_status(doc_id, name)
     if st in {"extracted", "validated", "done"}:
-        log.info("Estrazione già fatta: %s", doc_id)
+        log.info("Estrazione %s già fatta: %s", name, doc_id)
         return
     if st not in {"enumerated", "reconciled", "needs_review"}:
         raise ValueError(f"Estrazione richiede enumerated, trovato {st}")
@@ -301,7 +403,7 @@ def run(
                                  guided_json_schema=guided)
         except Exception as e:
             # esito del task persistito: un fallimento non è mai "campo assente"
-            db.record_task(doc_id, task.name, "failed", str(e))
+            db.record_task(doc_id, task.name, "failed", str(e), schema_name=name)
             log.error("Task %s fallito: %s", task.name, e)
             failed = True
             continue
@@ -323,7 +425,8 @@ def run(
         missing = _task_missing_fields(task, rows, schema_strict)
         if missing:
             db.record_task(doc_id, task.name, "failed",
-                           f"campi omessi (assenza non dichiarata): {sorted(missing)}")
+                           f"campi omessi (assenza non dichiarata): {sorted(missing)}",
+                           schema_name=name)
             log.error("Task %s: risposta incompleta, campi omessi: %s",
                       task.name, sorted(missing))
             failed = True
@@ -344,18 +447,19 @@ def run(
                 attempt=1,
                 status="pending",
                 confidence=row.get("confidence"),
+                schema_name=name,
             )
-        db.record_task(doc_id, task.name, "ok")
+        db.record_task(doc_id, task.name, "ok", schema_name=name)
         log.info("Task %s: %d campi estratti", task.name, len(rows))
 
     if failed:
         # nessun avanzamento implicito: i task falliti restano visibili
-        db.set_status(doc_id, "needs_review")
+        db.set_schema_status(doc_id, name, "needs_review")
         return
 
-    st = db.get_status(doc_id)
+    st = db.schema_status(doc_id, name)
     if st in {"enumerated", "reconciled"}:
-        db.transition(doc_id, st, "extracted")
+        db.transition_schema(doc_id, name, st, "extracted")
     # da needs_review lo stato resta invariato: la chiusura spetta alla Fase 6
     # (percorso needs_review), che rivalida i pending e applica gli stessi
     # controlli di completezza della revisione umana. Spingere qui a

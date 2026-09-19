@@ -51,3 +51,26 @@ Gli elementi di lista si annotano con `_anchor` e `_page`, non per posizione:
 gli indici `traits[N]` cambiano da una run all'altra (`Damage Resistance` era
 `traits[9]` nella run 1 e `traits[12]` nella run 3). La Fase 8 rimappa
 `_anchor`+`_page` sull'indice reale leggendo l'inventario della Fase 4.
+
+## L'annotazione del PHB è in quarantena
+
+`annotations.scope-stretto/` contiene l'annotazione dei 19 tratti del Player's
+Handbook, scritta quando `raceTraits` accettava solo cinque kind di effetto —
+resistenze, CA, velocità, punti ferita — perché erano gli unici che il seed
+curato conteneva.
+
+Quello scope era un errore di lettura: il seed è l'arretrato del lavoro a mano,
+non il contratto. Il contratto è la tassonomia, e `featureEffect` ha 25 kind, di
+cui `proficiency_grant`, `spell_grant` ed `extra_damage_dice` sono già usati in
+altri file del compendium.
+
+Con lo scope allargato quell'annotazione **misura il bersaglio sbagliato**:
+Keen Senses o Drow Magic vi risultano "nessun effetto" mentre ora hanno un kind
+che li esprime. Lasciarla attiva produrrebbe errori falsi, quindi `dev.txt` è
+vuoto e `eval` non gira finché non è riannotata.
+
+Cosa serve per riattivarla: una passata sul testo OCR del capitolo razze con lo
+scope nuovo, e — come prima — una seconda passata indipendente da confrontare
+con `gold-diff`. I numeri delle run 3-6 (da 85/95 a 94/95, errore silenzioso da
+0,063 a 0,0105) restano validi come storia di quello scope, ma **non** sono
+confrontabili con quelli che verranno.

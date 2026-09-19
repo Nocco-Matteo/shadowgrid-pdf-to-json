@@ -167,6 +167,7 @@ def _already_taken(item: ListItem, kept: dict[int, list[tuple[str, tuple]]]) -> 
 def run(
     doc_id: str,
     list_field_path: str,
+    schema_name: str,
     db: DB | None = None,
     settings: Settings | None = None,
     client: ExtractorClient | None = None,
@@ -185,7 +186,7 @@ def run(
     """
     s = settings or get_settings()
     db = db or DB(s)
-    st = db.get_status(doc_id)
+    st = db.schema_status(doc_id, schema_name)
     if st is None:
         raise ValueError(f"Documento {doc_id} sconosciuto")
     if st in {"extracted", "validated", "done"}:
@@ -258,10 +259,10 @@ def run(
             # una finestra fallita non ferma il documento, ma non passa in
             # silenzio: task fallito -> needs_review (niente done)
             log.error("Enumerate %s fallita: %s", task, e)
-            db.record_task(doc_id, task, "failed", str(e))
+            db.record_task(doc_id, task, "failed", str(e), schema_name=schema_name)
             failed_windows += 1
             continue
-        db.record_task(doc_id, task, "ok")
+        db.record_task(doc_id, task, "ok", schema_name=schema_name)
         items_raw = raw.get("items", [])
         n_before = len(items)
         for it in items_raw:
@@ -281,7 +282,7 @@ def run(
     if failed_windows:
         log.error("Enumerate %s: %d/%d finestre fallite -> needs_review",
                   list_field_path, failed_windows, len(windows))
-        db.set_status(doc_id, "needs_review")
+        db.set_schema_status(doc_id, schema_name, "needs_review")
 
     # Controllo di copertura indipendente
     if expected_count is not None and expected_count != len(items):
@@ -289,7 +290,7 @@ def run(
             "Copertura discordante per %s: attesi %d, trovati %d -> needs_review",
             list_field_path, expected_count, len(items),
         )
-        db.set_status(doc_id, "needs_review")
+        db.set_schema_status(doc_id, schema_name, "needs_review")
 
     # Salva l'inventario come estrazione speciale (field_path = list_field_path + "$inventory")
     db.upsert_extraction(
@@ -307,15 +308,16 @@ def run(
         attempt=1,
         status="validated",
         confidence="high",
+        schema_name=schema_name,
     )
 
     # Stato: reconciled -> enumerated (solo se non già needs_review)
-    st = db.get_status(doc_id)
+    st = db.schema_status(doc_id, schema_name)
     if st == "reconciled":
-        db.transition(doc_id, "reconciled", "enumerated")
+        db.transition_schema(doc_id, schema_name, "reconciled", "enumerated")
     elif st == "needs_review" and expected_count == len(items):
         # la ripetizione ha risolto il motivo della revisione
-        db.set_status(doc_id, "enumerated")
+        db.set_schema_status(doc_id, schema_name, "enumerated")
 
     return items
 
