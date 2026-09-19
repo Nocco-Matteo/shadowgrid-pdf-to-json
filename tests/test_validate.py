@@ -363,8 +363,12 @@ def test_validate_from_needs_review_finalizes(tmp_path):
 
 
 def test_retry_list_item_reads_single_element_response(tmp_path):
-    """Regressione smoke: il retry di parties[1].x riceve una lista di UN
-    elemento (schema single_item) e deve leggerne l'elemento 0, non l'indice 1."""
+    """Il retry di parties[1].name chiede SOLO il campo name, non l'elemento
+    intero: riemettere i campi già validati costa token e nella run 3 ha fatto
+    esaurire max_tokens prima ancora di arrivare al campo sbagliato.
+
+    Se il modello incarta comunque la risposta nell'elemento di lista (come fa
+    qui lo stub), va letta lo stesso, leggendo l'elemento 0 e non l'indice 1."""
     from pipeline.config import Settings
     from pipeline.db import DB
     from pipeline.phase6_validate import run
@@ -412,7 +416,7 @@ def test_retry_list_item_reads_single_element_response(tmp_path):
     row = db.latest_extraction("d", "parties[1].name")
     assert row["attempt"] == 2 and row["status"] == "validated"
     assert row["page_no"] == 1
-    assert schemas and schemas[0]["properties"]["parties"]["maxItems"] == 1
+    assert schemas and set(schemas[0]["properties"]) == {"name"}
 
 
 # ---------------------------------------------------------------------------

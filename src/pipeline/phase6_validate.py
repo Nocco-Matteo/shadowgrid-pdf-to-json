@@ -623,16 +623,29 @@ def _retry_extract(
         for pn in page_nos for r in db.get_canonical_regions(doc_id, pn)
     ]
     # Schema del solo campo in retry. Per un elemento di lista (parties[1].name)
-    # il modello risponde con una lista di UN elemento: l'indice va riletto a 0.
+    # si parte dal modello interno ristretto al campo che ha fallito: chiedere
+    # l'elemento intero fa riemettere tutti i suoi campi per correggerne uno, e
+    # su un retry che non converge il modello esaurisce max_tokens prima ancora
+    # di arrivarci — nella run 3 due tentativi su traits[12].effects sono morti
+    # dentro `raceName`, che era già validato.
     top = _SEG.match(field_path)
     top_field, item_idx = top.group(1), top.group(2)
+    leaf_name = field_path[top.end():].lstrip(".")
+    inner = (_list_inner_type(schema_strict.model_fields[top_field].annotation)
+             if item_idx is not None and top_field in schema_strict.model_fields else None)
+    narrow = bool(inner is not None and leaf_name
+                  and not set(leaf_name) & set(".[")
+                  and leaf_name in getattr(inner, "model_fields", {}))
     lines = ["REGIONI (id | pagina | tipo | testo):"]
     lines += [f"[{r['region_id']}] p.{r['page']} {r['type']}: {r['text']}" for r in regions]
     lines += [
         "",
         f"CAMPO DA ESTRARRE: {field_path}",
     ]
-    if item_idx is not None:
+    if narrow:
+        lines.append(f"Rispondi SOLO con il campo '{leaf_name}' di quell'elemento: "
+                     f"gli altri campi sono già stati validati, non riemetterli.")
+    elif item_idx is not None:
         lines.append(f"Rispondi con la lista '{top_field}' contenente SOLO l'elemento a cui "
                      f"appartiene il valore precedente (compila tutti i suoi campi).")
     lines += [
@@ -650,15 +663,20 @@ def _retry_extract(
                 "page_no": row["page_no"], "bbox": _bbox(row),
                 "confidence": row["confidence"]}
     try:
-        raw = client.extract("\n".join(lines),
-                             guided_json_schema=guided_schema(
-                                 schema_strict, [top_field], single_item=item_idx is not None))
+        raw = client.extract(
+            "\n".join(lines),
+            guided_json_schema=(guided_schema(inner, [leaf_name]) if narrow else
+                                guided_schema(schema_strict, [top_field],
+                                              single_item=item_idx is not None)))
     except Exception as e:
         log.warning("Retry extract fallito (%s): %s", field_path, e)
         return fallback
-    path_in_raw = field_path if item_idx is None else (
-        f"{top_field}[0]" + field_path[top.end():])
+    path_in_raw = (leaf_name if narrow else field_path if item_idx is None else
+                   f"{top_field}[0]" + field_path[top.end():])
     leaf = _get_path(raw, path_in_raw)
+    if narrow and not isinstance(leaf, dict):
+        # il modello ha incartato la risposta nell'elemento di lista comunque
+        leaf = _get_path(raw, f"{top_field}[0].{leaf_name}")
     if not isinstance(leaf, dict) or ("value" not in leaf and "quote" not in leaf):
         log.warning("Retry: campo %s assente nella risposta", field_path)
         return fallback
