@@ -283,6 +283,26 @@ def cmd_run(args) -> None:
         export_doc(doc_id, schema, db, s, args.sources or s.source_codes)
 
 
+def cmd_gold_diff(args) -> None:
+    """Disaccordi fra l'annotazione gold e la seconda passata indipendente."""
+    gold = Path(args.gold_dir)
+    for doc_id in args.doc_ids or []:
+        a_path = gold / "annotations" / f"{doc_id}.json"
+        b_path = gold / "worksheet" / f"{doc_id}.json"
+        if not (a_path.exists() and b_path.exists()):
+            log.error("Manca %s", a_path if not a_path.exists() else b_path)
+            continue
+        diffs = phase8_eval.compare_annotations(
+            json.loads(a_path.read_text(encoding="utf-8")),
+            json.loads(b_path.read_text(encoding="utf-8")))
+        print(f"=== {doc_id}: {len(diffs)} disaccordi "
+              f"(A={a_path.name} annotations, B=worksheet) ===")
+        for d in diffs:
+            print(" ", d)
+        if not diffs:
+            print("  nessuno: le due passate concordano su tutto il compilato")
+
+
 def cmd_reorder(args) -> None:
     """Riapplica l'ordine di lettura alle regioni già in DB (niente GPU)."""
     db = DB()
@@ -387,6 +407,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--source", dest="sources", action="append",
                     help="codice del libro per l'export (es. players_handbook), ripetibile")
     sp.set_defaults(func=cmd_run)
+
+    sp = sub.add_parser(
+        "gold-diff",
+        help="confronta gold/annotations con gold/worksheet (doppia annotazione)")
+    sp.add_argument("--doc-id", dest="doc_ids", nargs="*", required=True)
+    sp.add_argument("--gold-dir", default="gold")
+    sp.set_defaults(func=cmd_gold_diff)
 
     sp = sub.add_parser(
         "reorder",

@@ -1,0 +1,411 @@
+{
+  "traits": [
+    {
+      "_anchor": "Speed.",
+      "_page": 16,
+      "raceName": {
+        "value": "Dwarf"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Speed"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "speed_bonus",
+            "amount": -5
+          }
+        ]
+      }
+    },
+    {
+      "_anchor": "Dwarven Resilience.",
+      "_page": 16,
+      "raceName": {
+        "value": "Dwarf"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Dwarven Resilience"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resistance",
+            "damageTypes": [
+              "poison"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "_anchor": "Dwarven Toughness.",
+      "_page": 16,
+      "raceName": {
+        "value": "Dwarf"
+      },
+      "subraceName": {
+        "value": "Hill"
+      },
+      "featureName": {
+        "value": "Dwarven Toughness"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "hp_bonus_per_level",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_anchor": "Speed.",
+      "_page": 19,
+      "raceName": {
+        "value": "Elf"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Speed"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Fey Ancestry.",
+      "_page": 19,
+      "raceName": {
+        "value": "Elf"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Fey Ancestry"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Fleet of Foot.",
+      "_page": 20,
+      "raceName": {
+        "value": "Elf"
+      },
+      "subraceName": {
+        "value": "Wood"
+      },
+      "featureName": {
+        "value": "Fleet of Foot"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "speed_bonus",
+            "amount": 5
+          }
+        ]
+      }
+    },
+    {
+      "_anchor": "Superior Darkvision.",
+      "_page": 20,
+      "raceName": {
+        "value": "Elf"
+      },
+      "subraceName": {
+        "value": "Dark"
+      },
+      "featureName": {
+        "value": "Superior Darkvision"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Sunlight Sensitivity.",
+      "_page": 20,
+      "raceName": {
+        "value": "Elf"
+      },
+      "subraceName": {
+        "value": "Dark"
+      },
+      "featureName": {
+        "value": "Sunlight Sensitivity"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Speed.",
+      "_page": 23,
+      "raceName": {
+        "value": "Halfling"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Speed"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "speed_bonus",
+            "amount": -5
+          }
+        ]
+      }
+    },
+    {
+      "_anchor": "Stout Resilience.",
+      "_page": 23,
+      "raceName": {
+        "value": "Halfling"
+      },
+      "subraceName": {
+        "value": "Stout"
+      },
+      "featureName": {
+        "value": "Stout Resilience"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resistance",
+            "damageTypes": [
+              "poison"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "_anchor": "Speed.",
+      "_page": 26,
+      "raceName": {
+        "value": "Human"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Speed"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Speed.",
+      "_page": 29,
+      "raceName": {
+        "value": "Dragonborn"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Speed"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Damage Resistance.",
+      "_page": 29,
+      "raceName": {
+        "value": "Dragonborn"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Damage Resistance"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Speed.",
+      "_page": 32,
+      "raceName": {
+        "value": "Gnome"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Speed"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "speed_bonus",
+            "amount": -5
+          }
+        ]
+      }
+    },
+    {
+      "_anchor": "Speed.",
+      "_page": 34,
+      "raceName": {
+        "value": "Half-Elf"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Speed"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Speed.",
+      "_page": 36,
+      "raceName": {
+        "value": "Half-Orc"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Speed"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Relentless Endurance.",
+      "_page": 36,
+      "raceName": {
+        "value": "Half-Orc"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Relentless Endurance"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Speed.",
+      "_page": 38,
+      "raceName": {
+        "value": "Tiefling"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Speed"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": null
+      }
+    },
+    {
+      "_anchor": "Hellish Resistance.",
+      "_page": 38,
+      "raceName": {
+        "value": "Tiefling"
+      },
+      "subraceName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Hellish Resistance"
+      },
+      "grantedAtLevel": {
+        "value": null
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resistance",
+            "damageTypes": [
+              "fire"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -112,12 +112,18 @@ class RaceTrait(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     raceName: Extracted[str] = Field(description=(
-        "nome della razza come scritto nel titolo della sua sezione (es. 'Dwarf', "
-        "'Genasi (Fire)'); quote = quel titolo"))
+        "la razza BASE, mai il titolo della sottorazza per intero. Un titolo "
+        "'<Qualificatore> <Razza>' si divide: sotto 'WOOD ELF' raceName è 'Elf' "
+        "(non 'Wood Elf'), sotto 'HILL DWARF' è 'Dwarf', sotto 'DARK ELF (DROW)' "
+        "è 'Elf'. Se il titolo è solo un qualificatore ('STOUT', 'LIGHTFOOT') la "
+        "razza è quella della sezione '<Razza> Traits' che lo contiene. "
+        "quote = il titolo da cui la leggi"))
     subraceName: Extracted[str | None] = Field(
         default_factory=lambda: Extracted(value=None, quote=None),
-        description=("sottorazza se il tratto è di una sottorazza (titolo 'Hill Dwarf' "
-                     "-> 'Hill'); altrimenti value=null e quote=null"))
+        description=("il qualificatore del titolo della sottorazza, SENZA il nome "
+                     "della razza: 'Hill Dwarf' -> 'Hill', 'Wood Elf' -> 'Wood', "
+                     "'Dark Elf (Drow)' -> 'Dark', 'Stout' -> 'Stout'. Tratto di una "
+                     "razza senza sottorazza: value=null e quote=null"))
     featureName: Extracted[str] = Field(description=(
         "nome del tratto come scritto, senza il punto finale (es. 'Dwarven Resilience')"))
     grantedAtLevel: Extracted[int | None] = Field(

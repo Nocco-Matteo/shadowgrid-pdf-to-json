@@ -91,3 +91,91 @@ def test_evaluate_uses_latest_attempt(db, gold):
     m = evaluate(gold, db=db, split="sealed")
     by_path = {f.field_path: f for f in m.fields}
     assert by_path["contract_number"].recall == 0.0
+
+
+def test_gold_items_resolve_by_identity_not_position(tmp_path):
+    """Gli indici di lista non sono stabili fra run: `Damage Resistance` era
+    traits[9] nella run 1 e traits[12] nella run 3. Un gold indicizzato per
+    posizione confronterebbe tratti diversi, e il metro misurerebbe rumore.
+
+    L'identità è (pagina, anchor), con l'anchor confrontata per prefisso perché
+    anche quella cambia lunghezza fra una run e l'altra."""
+    import json
+
+    from pipeline.config import Settings
+    from pipeline.db import DB
+    from pipeline.phase8_eval import evaluate
+
+    s = Settings(db_path=tmp_path / "t.db", work_dir=tmp_path / "w")
+    s.work_dir.mkdir(parents=True, exist_ok=True)
+    db = DB(s)
+    db.upsert_document("d", "/a.pdf", "sha", 1)
+    # in questa run il tratto cercato sta in posizione 2, non 0
+    db.upsert_extraction("d", "traits$inventory", json.dumps([
+        {"anchor": "Speed.", "page": 1},
+        {"anchor": "Darkvision.", "page": 1},
+        {"anchor": "Hellish Resistance. You have resistance to fire damage.", "page": 3},
+    ]), None, None, None, 1, "validated", "high")
+    db.upsert_extraction("d", "traits[2].featureName", '"Hellish Resistance"',
+                         "Hellish Resistance", 3, None, 1, "validated", "high")
+
+    gold = tmp_path / "gold"
+    (gold / "annotations").mkdir(parents=True)
+    (gold / "dev.txt").write_text("d\n")
+    (gold / "annotations" / "d.json").write_text(json.dumps({"traits": [
+        {"_anchor": "Hellish Resistance.", "_page": 3,
+         "featureName": {"value": "Hellish Resistance"}},
+    ]}))
+
+    m = evaluate(gold, db=db, settings=s, split="dev")
+    got = {f.field_path: f for f in m.fields}
+    assert "traits[2].featureName" in got, "anchor non risolta sull'indice reale"
+    assert got["traits[2].featureName"].exact_match == 1.0
+    db.close()
+
+
+def test_gold_item_missing_from_run_counts_as_recall_loss(tmp_path):
+    """Un tratto annotato ma mai enumerato non deve sparire dal conteggio."""
+    import json
+
+    from pipeline.config import Settings
+    from pipeline.db import DB
+    from pipeline.phase8_eval import evaluate
+
+    s = Settings(db_path=tmp_path / "t.db", work_dir=tmp_path / "w")
+    s.work_dir.mkdir(parents=True, exist_ok=True)
+    db = DB(s)
+    db.upsert_document("d", "/a.pdf", "sha", 1)
+    db.upsert_extraction("d", "traits$inventory", json.dumps(
+        [{"anchor": "Speed.", "page": 1}]), None, None, None, 1, "validated", "high")
+
+    gold = tmp_path / "gold"
+    (gold / "annotations").mkdir(parents=True)
+    (gold / "dev.txt").write_text("d\n")
+    (gold / "annotations" / "d.json").write_text(json.dumps({"traits": [
+        {"_anchor": "Stout Resilience.", "_page": 9,
+         "featureName": {"value": "Stout Resilience"}},
+    ]}))
+
+    m = evaluate(gold, db=db, settings=s, split="dev")
+    missing = [f for f in m.fields if "mancante" in f.field_path]
+    assert missing and missing[0].recall == 0.0
+    db.close()
+
+
+def test_compare_annotations_finds_disagreements_and_skips_blanks():
+    """Doppia annotazione: i campi non ancora compilati non sono disaccordi,
+    quelli compilati e diversi sì."""
+    from pipeline.phase8_eval import PLACEHOLDER, compare_annotations
+
+    a = {"traits": [{"_anchor": "Fleet of Foot.", "_page": 20,
+                     "raceName": {"value": "Elf"}, "subraceName": {"value": "Wood"},
+                     "featureName": {"value": "Fleet of Foot"}}]}
+    b = {"traits": [{"_anchor": "Fleet of Foot.", "_page": 20,
+                     "raceName": {"value": "Wood Elf"}, "subraceName": {"value": None},
+                     "featureName": {"value": PLACEHOLDER}}]}
+    diffs = compare_annotations(a, b)
+    assert len(diffs) == 2  # featureName non compilato: non conta
+    assert any("raceName" in d for d in diffs)
+    assert any("subraceName" in d for d in diffs)
+    assert compare_annotations(a, a) == []
