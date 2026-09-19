@@ -91,13 +91,17 @@ def export_doc(doc_id: str, schema, db: DB, s, sources: list[str]) -> Path | Non
     errors = compendium.validate_envelope(envelope, seed_file)
     out_dir = Path(s.work_dir).parent / "export" / doc_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / seed_file
+    # Un envelope invalido NON prende il nome buono: a valle lo caricherebbe
+    # qualcuno convinto che sia un seed. Finisce accanto, marcato, e il file
+    # canonico di una export precedente valida resta dov'è.
+    out = out_dir / (seed_file if not errors else f"{seed_file}.invalid")
     out.write_text(json.dumps(envelope, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     (out_dir / f"{seed_file}.notes.txt").write_text("\n".join(notes + errors) + "\n",
                                                     encoding="utf-8")
     if errors:
-        log.error("Export %s NON valido contro il compendium (%d errori): %s",
-                  out, len(errors), errors[:3])
+        log.error("Export NON valido contro il compendium (%d errori): scritto in %s, "
+                  "NON in %s. Errori: %s",
+                  len(errors), out.name, seed_file, errors[:3])
     log.info("Export %s: %d definizioni, %d note (%s)", out, len(envelope["definitions"]),
              len(notes), out_dir / f"{seed_file}.notes.txt")
     return out

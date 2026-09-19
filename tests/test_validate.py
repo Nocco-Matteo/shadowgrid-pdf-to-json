@@ -456,3 +456,35 @@ def test_gate_derivation_is_only_for_speed():
     # 31 = 30 + 1 non testimonia nulla se il kind non è speed_bonus
     assert not gate_value_quote([{"kind": "ac_bonus", "amount": 1}],
                                 "Your armor class becomes 31.")
+
+
+# ---------------------------------------------------------------------------
+# 6.3 per campo — tassonomia del compendium
+# ---------------------------------------------------------------------------
+
+
+def test_compendium_def_resolves_from_field_path():
+    from pipeline.phase6_validate import _compendium_def
+    from pipeline.schema import RaceTraitsDoc
+
+    assert _compendium_def(RaceTraitsDoc, "traits[12].effects") == "featureEffect"
+    assert _compendium_def(RaceTraitsDoc, "traits[0].raceName") is None
+    assert _compendium_def(RaceTraitsDoc, "inesistente") is None
+
+
+def test_gate_compendium_catches_what_reached_the_export():
+    """I tre effetti usciti invalidi dalla run 2. Il check sul documento intero
+    li vedeva, ma arriva DOPO: le singole estrazioni restavano `validated` e
+    l'export prende proprio quelle."""
+    from pipeline.phase6_validate import gate_compendium
+
+    assert gate_compendium(
+        [{"kind": "resistance", "damageTypes": ["poison"]},
+         {"kind": "save_bonus", "condition": "always"}], "featureEffect")
+    assert gate_compendium(
+        [{"kind": "resistance",
+          "damageTypes": ["associated with your draconic ancestry"]}], "featureEffect")
+    # quelli buoni passano
+    assert gate_compendium([{"kind": "speed_bonus", "amount": -5}], "featureEffect") == []
+    assert gate_compendium(
+        [{"kind": "resistance", "damageTypes": ["fire"]}], "featureEffect") == []

@@ -145,6 +145,39 @@ def test_invalid_effect_fails_strict_schema(env):
     assert db.get_status("d") == "needs_review"
 
 
+def test_invalid_effect_never_reaches_the_export(env):
+    """Il cancello 6.3 è PER CAMPO: un effetto fuori tassonomia non arriva a
+    `validated`, quindi l'export (che filtra su `validated`) non lo vede.
+
+    Prima il controllo era solo sul documento intero: bocciava il documento ma
+    lasciava le estrazioni validate, e l'export le prendeva lo stesso. Nella
+    run 2 sono finiti nel seed 3 effetti invalidi con il log che dichiarava il
+    file non valido."""
+    db, s = env
+
+    class BadEffect(Stub):
+        def extract(self, prompt, images_b64=None, guided_json_schema=None):
+            out = super().extract(prompt, images_b64, guided_json_schema)
+            if "traits" in out and out["traits"][0]["effects"]["value"]:
+                out["traits"][0]["effects"]["value"] = [
+                    {"kind": "save_bonus", "condition": "always"}]  # né amount né ability
+            return out
+
+    stub = BadEffect(db)
+    phase4_enumerate.run("d", "traits", db=db, settings=s, client=stub)
+    phase5_extract.run("d", RaceTraitsDoc, db=db, settings=s, client=stub)
+    phase6_validate.run("d", RaceTraitsDoc, db=db, settings=s, client=stub)
+
+    bad = [r for r in db.get_extractions("d")
+           if r["field_path"].endswith(".effects") and r["value_json"]
+           and "save_bonus" in r["value_json"]]
+    assert bad and all(r["status"] != "validated" for r in bad)
+
+    out = export_doc("d", RaceTraitsDoc, db, s, ["players_handbook"])
+    assert out.name == "raceTraits.json", "envelope invalido scritto col nome buono"
+    assert validate_envelope(json.loads(out.read_text()), "raceTraits.json") == []
+
+
 def test_page_windows_overlap_and_budget():
     from pipeline.phase4_enumerate import _page_windows
 

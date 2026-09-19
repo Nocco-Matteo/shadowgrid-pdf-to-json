@@ -385,6 +385,50 @@ def _run_from_needs_review(
         log.info("Documento %s resta in needs_review", doc_id)
 
 
+def _compendium_def(schema_strict: type, field_path: str) -> str | None:
+    """Nome del `$defs` del compendium a cui il campo è vincolato, se c'è.
+
+    I campi marcati con `schema.compendium(<def>, ...)` portano una struttura
+    della tassonomia chiusa, non un valore libero: `traits[3].effects` ->
+    "featureEffect".
+    """
+    from pydantic import BaseModel
+
+    model: Any = schema_strict
+    field = None
+    for name in (n for n in re.split(r"[.\[]", field_path) if n and not n[0].isdigit()):
+        name = name.rstrip("]")
+        if not (isinstance(model, type) and issubclass(model, BaseModel)):
+            return None
+        field = model.model_fields.get(name)
+        if field is None:
+            return None
+        model = _list_inner_type(field.annotation)
+        if _is_extracted_model(model):
+            model = None
+    extra = getattr(field, "json_schema_extra", None)
+    return extra.get("compendium") if isinstance(extra, dict) else None
+
+
+def gate_compendium(value: Any, def_name: str) -> list[str]:
+    """Errori del valore contro la tassonomia chiusa del compendium.
+
+    Esiste come cancello PER CAMPO perché il controllo a livello di documento
+    (6.3) arriva troppo tardi: boccia il documento intero ma le singole
+    estrazioni restano `validated`, e l'export prende proprio quelle. Nella
+    run 2 sono usciti 3 effetti invalidi in un seed dichiarato non valido dal
+    log della riga sopra — cioè esattamente il dato che non deve passare.
+    """
+    from .compendium import validate_def
+
+    items = value if isinstance(value, list) else [value]
+    out: list[str] = []
+    for i, item in enumerate(items):
+        for e in validate_def(item, def_name):
+            out.append(f"[{i}] {e}" if isinstance(value, list) else e)
+    return out
+
+
 def _validate_one(
     doc_id: str,
     field_path: str,
@@ -428,8 +472,16 @@ def _validate_one(
         db.set_status(doc_id, "needs_review")
         return False, attempt
 
-    # 6.3 schema: il check cross-field completo si fa a fine fase sul documento
-    # intero (run -> _build_document + gate_schema).
+    # 6.3 tassonomia del compendium, per campo. Il check sul documento intero
+    # resta (run -> _build_document + gate_schema) ma arriva dopo l'export.
+    def_name = _compendium_def(schema_strict, field_path)
+    if def_name and value is not None:
+        errors = gate_compendium(value, def_name)
+        if errors:
+            log.warning("Compendium fallito per %s (attempt %d): %s",
+                        field_path, attempt, errors[:2])
+            return _maybe_retry(doc_id, field_path, row, schema_strict, db, s, client,
+                                err=f"compendium: {'; '.join(errors[:2])}")
 
     # 6.5 localizzazione bbox (sulle regioni canoniche)
     regions = []
