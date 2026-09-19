@@ -129,7 +129,14 @@ class RaceTrait(BaseModel):
         "(resistance, ac_bonus, ac_formula, speed_bonus, hp_bonus_per_level, ...). "
         "Solo ciò che cambia un numero del personaggio; quote = la frase della regola. "
         f"Velocità: speed_bonus.amount è la differenza da {BASE_WALKING_SPEED} feet "
-        f"('35 feet' -> 5, '25 feet' -> -5). "
+        f"('35 feet' -> 5, '25 feet' -> -5); una differenza di 0 NON è un effetto, "
+        f"ometti l'elemento. "
+        "condition solo se è la regola stessa a limitare l'effetto a quella "
+        "situazione; 'la velocità NON è ridotta dall'armatura pesante' non è una "
+        "condition sul valore base. "
+        "Vantaggio, competenza e immunità non numeriche NON sono effetti: non "
+        "metterli nella lista e non inventare campi per far quadrare lo schema "
+        "(meglio nessun effetto che uno inventato). "
         "Se il tratto non cambia nessun numero: value=null e quote=null"))
 
     @model_validator(mode="after")

@@ -75,8 +75,9 @@ def test_effect_needs_exactly_one_of_amount_or_alternative():
     assert c.validate_def({"kind": "save_bonus", "amount": 2}, "featureEffect") == []
     assert c.validate_def({"kind": "save_bonus", "fromAbilityModifier": "con"},
                           "featureEffect") == []
-    # amount 0 è un valore, non un'assenza: il vincolo è soddisfatto
-    assert c.validate_def({"kind": "speed_bonus", "amount": 0}, "featureEffect") == []
+    # amount presente soddisfa il vincolo (lo zero ha una regola sua:
+    # v. test_zero_delta_is_absence_not_effect)
+    assert c.validate_def({"kind": "speed_bonus", "amount": -5}, "featureEffect") == []
 
 
 def test_damage_type_must_be_one_of_the_closed_set():
@@ -108,3 +109,16 @@ def test_loader_rules_reach_nested_effects_of_an_envelope():
 def test_curated_seed_still_passes_the_loader_rules():
     """Le regole nuove non devono bocciare il seed curato a mano."""
     assert c.validate_envelope(SEED, "raceTraits.json") == []
+
+
+def test_zero_delta_is_absence_not_effect():
+    """`speed_bonus: 0` è quello che resta quando una razza va a 30 feet come
+    tutti: nessun cambiamento. Alla run 3 l'elfo l'ha prodotto mentre umano,
+    dragonide, mezzelfo, mezzorco e tiefling — stessa velocità, stessa frase —
+    non hanno prodotto effetti: incoerenza del modello, non delle razze."""
+    assert c.validate_def({"kind": "speed_bonus", "amount": 0}, "featureEffect")
+    assert c.validate_def({"kind": "speed_bonus", "amount": -5}, "featureEffect") == []
+    assert c.validate_def({"kind": "ac_bonus", "amount": 0}, "featureEffect")
+    # una grandezza diversa da amount non è toccata dalla regola
+    assert c.validate_def({"kind": "save_bonus", "fromAbilityModifier": "con"},
+                          "featureEffect") == []

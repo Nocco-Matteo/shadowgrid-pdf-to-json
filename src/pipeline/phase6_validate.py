@@ -658,6 +658,15 @@ def _retry_extract(
         f"IL TENTATIVO PRECEDENTE È FALLITO: {err}",
         f"Valore precedente: {row['value_json']}  quote: {row['quote']}",
         "Correggi: la nuova quote deve apparire verbatim nelle regioni fornite.",
+        # Senza questa riga un vincolo del tipo "serve amount" si può
+        # soddisfare solo AGGIUNGENDO, e il modello aggiunge: alla run 3 un
+        # save_bonus senza amount è tornato come fromAbilityModifier='con',
+        # cioè una meccanica inventata, su un testo che dice "advantage".
+        "- se un elemento della lista non corrisponde a un cambiamento numerico "
+        "scritto nel testo, la correzione è RIMUOVERLO dalla lista (o rispondere "
+        "value=null se resta vuota), non completarlo con campi che il testo non "
+        "dice. Nessun effetto è meglio di un effetto inventato per far quadrare "
+        "lo schema.",
     ]
     fallback = {"value_json": row["value_json"], "quote": row["quote"],
                 "page_no": row["page_no"], "bbox": _bbox(row),

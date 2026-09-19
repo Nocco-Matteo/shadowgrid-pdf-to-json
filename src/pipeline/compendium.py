@@ -125,6 +125,18 @@ EXACTLY_ONE_OF: dict[str, tuple[str, ...]] = {
 }
 
 
+# Effetti "delta": amount è l'unica grandezza, quindi amount 0 non cambia
+# niente ed è l'assenza di effetto, non un effetto. Alla run 3 l'elfo ha preso
+# uno `speed_bonus: 0` (30 feet meno i 30 di base) mentre umano, dragonide,
+# mezzelfo, mezzorco e tiefling — stessa velocità, stessa frase — sono usciti
+# senza effetti. Non è una differenza fra le razze, è incoerenza del modello.
+NO_OP_IF_ZERO = frozenset({
+    "speed_bonus", "ac_bonus", "attack_bonus", "save_bonus", "damage_bonus",
+    "initiative_bonus", "hp_bonus_per_level", "ability_score_bonus",
+    "spell_attack_bonus", "spell_save_dc_bonus", "check_modifier",
+})
+
+
 def _damage_types(path: str | Path = DEFAULT_SCHEMA_PATH) -> set[str]:
     """I 13 damage type chiusi. Lo schema li definisce in `damageTypeClosed` ma
     resistance/extra_damage_dice/spell_damage_bonus accettano ancora stringhe
@@ -147,6 +159,13 @@ def _loader_errors(value: Any, where: str = "") -> list[str]:
                 got = ", ".join(present) if present else "nessuno dei due"
                 out.append(f"{where or '<root>'}: {value['kind']} richiede "
                            f"esattamente uno tra {' e '.join(keys)} ({got})")
+        amount = value.get("amount")
+        if (value.get("kind") in NO_OP_IF_ZERO
+                and isinstance(amount, (int, float)) and not isinstance(amount, bool)
+                and amount == 0
+                and not set(value) - {"kind", "condition", "amount"}):
+            out.append(f"{where or '<root>'}: {value['kind']} con amount 0 non cambia "
+                       f"niente; è l'assenza di effetto, non un effetto")
         known = None
         for key in ("damageType", "damageTypes"):
             raw = value.get(key)
