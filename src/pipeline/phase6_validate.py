@@ -636,19 +636,13 @@ def _retry_extract(
     narrow = bool(inner is not None and leaf_name
                   and not set(leaf_name) & set(".[")
                   and leaf_name in getattr(inner, "model_fields", {}))
-    lines = ["REGIONI (id | pagina | tipo | testo):"]
-    lines += [f"[{r['region_id']}] p.{r['page']} {r['type']}: {r['text']}" for r in regions]
-    lines += [
+    head = ["REGIONI (id | pagina | tipo | testo):"]
+    head += [f"[{r['region_id']}] p.{r['page']} {r['type']}: {r['text']}" for r in regions]
+    head += [
         "",
         f"CAMPO DA ESTRARRE: {field_path}",
     ]
-    if narrow:
-        lines.append(f"Rispondi SOLO con il campo '{leaf_name}' di quell'elemento: "
-                     f"gli altri campi sono già stati validati, non riemetterli.")
-    elif item_idx is not None:
-        lines.append(f"Rispondi con la lista '{top_field}' contenente SOLO l'elemento a cui "
-                     f"appartiene il valore precedente (compila tutti i suoi campi).")
-    lines += [
+    tail = [
         "",
         "REGOLE:",
         "- restituisci un oggetto {value, quote, page, bbox, confidence}.",
@@ -671,19 +665,45 @@ def _retry_extract(
     fallback = {"value_json": row["value_json"], "quote": row["quote"],
                 "page_no": row["page_no"], "bbox": _bbox(row),
                 "confidence": row["confidence"]}
-    try:
-        raw = client.extract(
-            "\n".join(lines),
-            guided_json_schema=(guided_schema(inner, [leaf_name]) if narrow else
-                                guided_schema(schema_strict, [top_field],
-                                              single_item=item_idx is not None)))
-    except Exception as e:
-        log.warning("Retry extract fallito (%s): %s", field_path, e)
+
+    # Due forme della richiesta, in ordine di preferenza. La ristretta chiede
+    # solo il campo fallito (meno token, niente troncamenti) ma il server la
+    # può rifiutare: alla run 6 vLLM ha risposto 400 "Unsupported JSON Schema
+    # structure" per ogni retry, lasciando la riparazione morta senza che
+    # nulla nel risultato lo facesse notare. La forma intera è quella che ha
+    # sempre funzionato, quindi resta come ripiego.
+    shapes = []
+    if narrow:
+        shapes.append((
+            "ristretto",
+            f"Rispondi SOLO con il campo '{leaf_name}' di quell'elemento: gli altri "
+            f"campi sono già stati validati, non riemetterli.",
+            lambda: guided_schema(inner, [leaf_name]),
+            leaf_name,
+        ))
+    shapes.append((
+        "intero",
+        (f"Rispondi con la lista '{top_field}' contenente SOLO l'elemento a cui "
+         f"appartiene il valore precedente (compila tutti i suoi campi)."
+         if item_idx is not None else ""),
+        lambda: guided_schema(schema_strict, [top_field],
+                              single_item=item_idx is not None),
+        field_path if item_idx is None else f"{top_field}[0]" + field_path[top.end():],
+    ))
+
+    raw = path_in_raw = None
+    for name, instruction, build, path in shapes:
+        lines = head + ([instruction] if instruction else []) + tail
+        try:
+            raw = client.extract("\n".join(lines), guided_json_schema=build())
+            path_in_raw = path
+            break
+        except Exception as e:
+            log.warning("Retry %s con schema %s rifiutato: %s", field_path, name, e)
+    if raw is None:
         return fallback
-    path_in_raw = (leaf_name if narrow else field_path if item_idx is None else
-                   f"{top_field}[0]" + field_path[top.end():])
     leaf = _get_path(raw, path_in_raw)
-    if narrow and not isinstance(leaf, dict):
+    if not isinstance(leaf, dict) and item_idx is not None:
         # il modello ha incartato la risposta nell'elemento di lista comunque
         leaf = _get_path(raw, f"{top_field}[0].{leaf_name}")
     if not isinstance(leaf, dict) or ("value" not in leaf and "quote" not in leaf):
