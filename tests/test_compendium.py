@@ -122,3 +122,41 @@ def test_zero_delta_is_absence_not_effect():
     # una grandezza diversa da amount non è toccata dalla regola
     assert c.validate_def({"kind": "save_bonus", "fromAbilityModifier": "con"},
                           "featureEffect") == []
+
+
+def test_strip_defaults_makes_explicit_default_equal_to_omitted():
+    """`condition: "always"` è il default dichiarato dallo schema: scriverla o
+    ometterla è la stessa cosa. Alla run 5 il modello ha cominciato a scriverla
+    sempre e sette effetti GIUSTI sono stati contati sbagliati, nascondendo che
+    il tasso di errore era sceso invece di salire."""
+    explicit = [{"kind": "resistance", "damageTypes": ["fire"], "condition": "always"}]
+    implicit = [{"kind": "resistance", "damageTypes": ["fire"]}]
+    assert c.strip_defaults(explicit) == implicit
+    assert c.strip_defaults(implicit) == implicit
+    # una condition VERA non si tocca: è l'informazione, non il default
+    real = [{"kind": "speed_bonus", "amount": -5, "condition": "wearing_heavy_armor"}]
+    assert c.strip_defaults(real) == real
+    # kind sconosciuto: nessuna proprietà da togliere, nessun errore
+    assert c.strip_defaults([{"kind": "boh", "condition": "always"}]) == \
+        [{"kind": "boh", "condition": "always"}]
+
+
+def test_export_does_not_write_redundant_condition():
+    """Il seed curato non scrive mai `condition: always`: se l'export la scrive,
+    ogni riestrazione segnala 'effects diversi dal seed' su tratti identici."""
+    doc = {"traits": [{
+        "raceName": {"value": "Tiefling"}, "subraceName": {"value": None},
+        "featureName": {"value": "Hellish Resistance"},
+        "grantedAtLevel": {"value": None},
+        "effects": {"value": [{"kind": "resistance", "damageTypes": ["fire"],
+                               "condition": "always"}]},
+    }]}
+    seed = {"version": 1, "definitions": [{
+        "id": "race_tiefling_hellish_resistance", "raceName": "Tiefling",
+        "featureName": "Hellish Resistance", "grantedAtLevel": 1,
+        "sources": ["players_handbook"],
+        "effects": [{"kind": "resistance", "damageTypes": ["fire"]}]}]}
+    envelope, notes = c.export_race_traits(doc, ["players_handbook"], seed)
+    assert envelope["definitions"][0]["effects"] == [
+        {"kind": "resistance", "damageTypes": ["fire"]}]
+    assert not [n for n in notes if "diversi dal seed" in n]

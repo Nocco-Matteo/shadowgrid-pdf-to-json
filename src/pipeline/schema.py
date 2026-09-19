@@ -112,11 +112,14 @@ class RaceTrait(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     raceName: Extracted[str] = Field(description=(
-        "la razza BASE, mai il titolo della sottorazza per intero. Un titolo "
-        "'<Qualificatore> <Razza>' si divide: sotto 'WOOD ELF' raceName è 'Elf' "
-        "(non 'Wood Elf'), sotto 'HILL DWARF' è 'Dwarf', sotto 'DARK ELF (DROW)' "
-        "è 'Elf'. Se il titolo è solo un qualificatore ('STOUT', 'LIGHTFOOT') la "
-        "razza è quella della sezione '<Razza> Traits' che lo contiene. "
+        "la razza, presa dal titolo '<Razza> Traits' della sezione e MAI spezzata: "
+        "sotto 'HALF-ORC TRAITS' raceName è 'Half-Orc' (non 'Orc'), sotto "
+        "'DRAGONBORN TRAITS' è 'Dragonborn'. Solo quando il tratto sta sotto un "
+        "titolo di SOTTORAZZA quel titolo si divide e raceName è la razza che "
+        "contiene: 'WOOD ELF' -> 'Elf', 'HILL DWARF' -> 'Dwarf', "
+        "'DARK ELF (DROW)' -> 'Elf'; mai il titolo intero. Se il titolo della "
+        "sottorazza è solo un qualificatore ('STOUT', 'LIGHTFOOT') la razza è "
+        "quella della sezione '<Razza> Traits' che lo contiene. "
         "quote = il titolo da cui la leggi"))
     subraceName: Extracted[str | None] = Field(
         default_factory=lambda: Extracted(value=None, quote=None),

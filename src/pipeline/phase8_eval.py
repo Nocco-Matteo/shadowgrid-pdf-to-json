@@ -53,7 +53,11 @@ def _norm_value(v: Any) -> str:
     if v is None:
         return ""
     if isinstance(v, (dict, list)):
-        return json.dumps(v, sort_keys=True, ensure_ascii=False)
+        from .compendium import strip_defaults
+
+        # una proprietà scritta al suo default è identica alla stessa omessa:
+        # contarla come differenza fa risultare sbagliati campi giusti
+        return json.dumps(strip_defaults(v), sort_keys=True, ensure_ascii=False)
     return str(v).strip().lower()
 
 

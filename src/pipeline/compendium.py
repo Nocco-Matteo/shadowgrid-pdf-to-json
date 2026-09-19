@@ -146,6 +146,30 @@ def _damage_types(path: str | Path = DEFAULT_SCHEMA_PATH) -> set[str]:
     return set(load_schema(path)["$defs"]["damageTypeClosed"]["enum"])
 
 
+def strip_defaults(value: Any, path: str | Path = DEFAULT_SCHEMA_PATH) -> Any:
+    """Toglie dalle strutture del compendium le proprietà scritte esplicitamente
+    al loro valore di default.
+
+    Lo schema dichiara `condition` con default "always": ometterla e scriverla
+    sono la stessa cosa, e il seed curato a mano non la scrive mai. Senza questa
+    normalizzazione un `{"kind": "resistance", "damageTypes": ["fire"],
+    "condition": "always"}` risulta diverso dall'identico senza condition — e
+    alla run 5 sette effetti su nove sono stati contati sbagliati per questo,
+    nascondendo che erano giusti.
+    """
+    if isinstance(value, list):
+        return [strip_defaults(v, path) for v in value]
+    if not isinstance(value, dict):
+        return value
+    out = {k: strip_defaults(v, path) for k, v in value.items()}
+    props = (load_schema(path)["$defs"]["effects"]
+             .get(str(value.get("kind")), {}).get("properties", {}))
+    for k, spec in props.items():
+        if k in out and "default" in spec and out[k] == spec["default"]:
+            del out[k]
+    return out
+
+
 def _loader_errors(value: Any, where: str = "") -> list[str]:
     """Regole che lo schema documenta ma non codifica e che a runtime applica
     il loader del compendium. Ricorsivo: un envelope va controllato fino agli
@@ -270,11 +294,14 @@ def export_race_traits(
         entry["featureName"] = feature
         entry["grantedAtLevel"] = val("grantedAtLevel") or 1
         entry["sources"] = sorted(set(sources) | set(prev["sources"] if prev else []))
-        entry["effects"] = copy.deepcopy(effects)
+        # senza strip il seed si riempie di `condition: "always"`, che il
+        # seed curato non scrive mai: ogni riestrazione segnalerebbe
+        # "effects diversi dal seed" su tratti in realtà identici
+        entry["effects"] = strip_defaults(copy.deepcopy(effects))
         if prev and prev.get("notes"):
             entry["notes"] = prev["notes"]
         definitions.append(entry)
-        if prev and prev.get("effects") != effects:
+        if prev and strip_defaults(prev.get("effects")) != entry["effects"]:
             notes.append(f"{tid}: effects diversi dal seed (seed={json.dumps(prev['effects'])})")
 
     return {"version": 1, "definitions": definitions}, notes
