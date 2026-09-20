@@ -108,7 +108,7 @@ def test_race_traits_end_to_end(env, tmp_path):
     item_prompt = next(p for p in stub.prompts if "ELEMENTO: Dwarven Toughness" in p)
     # il titolo della sottorazza è nel contesto, con la pagina; campi descritti
     assert "p.2 text: Hill Dwarf" in item_prompt and "SEZIONE: Hill Dwarf" in item_prompt
-    assert "- effects: effetti del tratto nella tassonomia" in item_prompt
+    assert "- effects: effetti della regola nella tassonomia" in item_prompt
     # lo schema guidato vincola effects alla tassonomia del compendium
     assert any(k.startswith("cmp__effects__resistance") for k in stub.schemas[-1]["$defs"])
 

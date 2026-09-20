@@ -119,27 +119,35 @@ _FEATURE_NAME_DESC = (
 _GRANTED_AT_DESC = (
     "livello a cui si ottiene SOLO se il testo lo dice (es. 'when you reach "
     "5th level' -> 5); altrimenti value=null e quote=null")
-_EFFECTS_DESC = (
-        "effetti del tratto nella tassonomia chiusa del compendium. Usa il kind "
-        "che corrisponde alla regola: resistance (resistenze/immunità), "
-        "speed_bonus, hp_bonus_per_level, ac_bonus, ac_formula, "
-        "proficiency_grant (competenze in abilità/strumenti/tiri salvezza), "
-        "spell_grant (incantesimi concessi dal tratto), extra_damage_dice, "
-        "damage_bonus, attack_bonus, save_bonus, initiative_bonus, check_modifier. "
-        "Se la regola non è esprimibile con NESSUNO di questi kind (portata della "
-        "scurovisione, competenza in armi o armature, raddoppio del bonus di "
-        "competenza): value=null e quote=null, non forzarla in un kind che non le "
-        "corrisponde. quote = la frase della regola. "
-        f"Velocità: speed_bonus.amount è la differenza da {BASE_WALKING_SPEED} feet "
-        f"('35 feet' -> 5, '25 feet' -> -5); una differenza di 0 NON è un effetto, "
-        f"ometti l'elemento. "
-        "condition solo se è la regola stessa a limitare l'effetto a quella "
-        "situazione; 'la velocità NON è ridotta dall'armatura pesante' non è una "
-        "condition sul valore base. "
-        "Vantaggio, competenza e immunità non numeriche NON sono effetti: non "
-        "metterli nella lista e non inventare campi per far quadrare lo schema "
-        "(meglio nessun effetto che uno inventato). "
-        "Se il tratto non cambia nessun numero: value=null e quote=null")
+def _effects_desc() -> str:
+    """Descrizione del campo `effects`, con l'elenco dei kind GENERATO dallo
+    schema del compendium.
+
+    Scriverlo a mano e' costato 35 capacita' su 61: ne avevo elencati 13 su 25
+    e l'istruzione diceva di rispondere null quando nessuno corrisponde, cosi'
+    il modello rispondeva null — correttamente, viste le istruzioni.
+    """
+    from .compendium import effect_kinds_text
+
+    return (
+        "effetti della regola nella tassonomia CHIUSA del compendium. Scegli il "
+        "kind che corrisponde, e riempi i suoi campi: "
+        f"{effect_kinds_text()}. "
+        "Se la regola non e' esprimibile con nessuno di questi kind (portata "
+        "della scurovisione, competenza in armi o armature): value=null e "
+        "quote=null, non forzarla in un kind che non le corrisponde. "
+        "quote = la frase della regola. "
+        f"Velocita': speed_bonus.amount e' la differenza da {BASE_WALKING_SPEED} "
+        "feet ('35 feet' -> 5, '25 feet' -> -5); una differenza di 0 NON e' un "
+        "effetto, ometti l'elemento. "
+        "condition solo se e' la regola stessa a limitare l'effetto a quella "
+        "situazione; 'la velocita' NON e' ridotta dall'armatura pesante' non e' "
+        "una condition sul valore base. "
+        "Vantaggio e immunita' non numeriche NON sono effetti: non metterli "
+        "nella lista e non inventare campi per far quadrare lo schema (meglio "
+        "nessun effetto che uno inventato). "
+        "Se la regola non cambia nessun numero: value=null e quote=null"
+    )
 
 
 def effect_family(
@@ -175,7 +183,7 @@ def effect_family(
     fields["grantedAtLevel"] = (
         Extracted[int | None], Field(default_factory=_absent, description=_GRANTED_AT_DESC))
     fields["effects"] = (
-        Extracted[list[dict[str, Any]]], compendium("featureEffect", _EFFECTS_DESC))
+        Extracted[list[dict[str, Any]]], compendium("featureEffect", _effects_desc()))
 
     def _check_effects(self):
         from .compendium import validate_def

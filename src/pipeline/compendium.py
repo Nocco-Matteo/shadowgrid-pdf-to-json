@@ -146,6 +146,42 @@ def _damage_types(path: str | Path = DEFAULT_SCHEMA_PATH) -> set[str]:
     return set(load_schema(path)["$defs"]["damageTypeClosed"]["enum"])
 
 
+def effect_kinds(def_name: str = "featureEffect",
+                 path: str | Path = DEFAULT_SCHEMA_PATH) -> list[tuple[str, list[str]]]:
+    """I kind ammessi da un `$defs` del compendium, con i loro campi.
+
+    Serve a GENERARE l'elenco per il prompt invece di scriverlo a mano. La
+    descrizione di `effects` ne elencava 13 su 25 — li avevo digitati io e ne
+    avevo dimenticati dodici, fra cui `resource_cost`, che e` il kind piu`
+    frequente nelle capacita' di classe curate. L'istruzione diceva di
+    rispondere null quando nessun kind corrisponde, quindi il modello
+    rispondeva null: su 61 capacita' misurate contro il compendium, 35
+    sbagliavano solo per questo.
+
+    Generandolo l'elenco e` completo per costruzione e segue la tassonomia se
+    cambia, invece di restare indietro in silenzio.
+    """
+    defs = load_schema(path)["$defs"]
+    node = defs.get(def_name, {})
+    refs = [r["$ref"].split("/")[-1] for r in node.get("oneOf", []) if "$ref" in r]
+    out: list[tuple[str, list[str]]] = []
+    for ref in refs:
+        d = defs.get("effects", {}).get(ref.split("/")[-1]) or defs.get(ref, {})
+        if not isinstance(d, dict):
+            continue
+        props = d.get("properties", {})
+        kind = (props.get("kind") or {}).get("const") or ref.rsplit("/", 1)[-1]
+        out.append((kind, [k for k in props if k not in ("kind", "condition")]))
+    return out
+
+
+def effect_kinds_text(def_name: str = "featureEffect",
+                      path: str | Path = DEFAULT_SCHEMA_PATH) -> str:
+    """L'elenco dei kind formattato per il prompt: `nome(campi)`, separati."""
+    return "; ".join(f"{k}({', '.join(f)})" if f else k
+                     for k, f in effect_kinds(def_name, path))
+
+
 def strip_defaults(value: Any, path: str | Path = DEFAULT_SCHEMA_PATH) -> Any:
     """Toglie dalle strutture del compendium le proprietà scritte esplicitamente
     al loro valore di default.
@@ -308,6 +344,8 @@ def export_race_traits(
 
 
 __all__ = [
+    "effect_kinds",
+    "effect_kinds_text",
     "DEFAULT_SCHEMA_PATH",
     "load_schema",
     "decoding_schema",

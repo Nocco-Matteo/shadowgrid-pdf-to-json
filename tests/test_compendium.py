@@ -160,3 +160,31 @@ def test_export_does_not_write_redundant_condition():
     assert envelope["definitions"][0]["effects"] == [
         {"kind": "resistance", "damageTypes": ["fire"]}]
     assert not [n for n in notes if "diversi dal seed" in n]
+
+
+def test_effect_kinds_are_generated_from_the_schema():
+    """L'elenco dei kind nel prompt va generato, non scritto a mano.
+
+    Scritto a mano ne conteneva 13 su 25, e mancava `resource_cost`, che e' il
+    kind piu' frequente fra le capacita' di classe curate. L'istruzione diceva
+    di rispondere null quando nessun kind corrisponde, quindi il modello
+    rispondeva null: 35 capacita' su 61 sbagliavano solo per questo."""
+    kinds = dict(c.effect_kinds())
+    assert len(kinds) == 25, f"attesi 25 kind, trovati {len(kinds)}"
+    # i kind la cui assenza era misurabile nel gold
+    for k in ("resource_cost", "extra_attack", "save_evasion",
+              "ability_score_bonus", "ability_substitution", "damage_die"):
+        assert k in kinds, k
+    # ogni kind porta con se' i campi che lo distinguono
+    assert "resourceId" in kinds["resource_cost"]
+    assert "byLevel" in kinds["extra_attack"]
+    assert "damageTypes" in kinds["resistance"]
+    # `kind` e `condition` non sono campi da elencare: il primo e' il nome
+    # stesso, il secondo ha una regola sua nel prompt
+    assert all("kind" not in f and "condition" not in f for f in kinds.values())
+
+
+def test_effect_kinds_text_lists_every_kind():
+    txt = c.effect_kinds_text()
+    for k in dict(c.effect_kinds()):
+        assert k in txt, k
