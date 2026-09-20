@@ -54,7 +54,13 @@ extractor_max_model_len: 8192
 # extractor_enforce_eager: true           # niente CUDA graph (più VRAM per la KV)
 # extractor_text_only: true               # niente encoder visivo (~0.8GB + profiling)
 # extractor_max_num_seqs: 8               # richieste parallele max
-# extractor_vllm_args: ["--enforce-eager"]  # argomenti extra per `vllm serve`
+# Backend per l'output vincolato. Il default 'auto' sceglieva un percorso che
+# compila lo schema JSON in una ESPRESSIONE REGOLARE, e con la tassonomia
+# featureEffect (25 kind) la compilazione sfora il timeout di 5s: 161 richieste
+# fallite e il motore morto (EngineDeadError) alla prima estrazione delle
+# capacita' di classe. xgrammar costruisce l'automa dallo schema senza passare
+# da una regex.
+extractor_vllm_args: ["--structured-outputs-config.backend", "xgrammar"]
 
 # --- Estrazione ---
 # Token massimi di risposta. 2048 tronca l'inventario della Fase 4 sui
