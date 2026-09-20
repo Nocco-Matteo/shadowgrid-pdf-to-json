@@ -31,7 +31,7 @@ from rapidfuzz.fuzz import partial_ratio
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
-from .parallel import in_order
+from .parallel import Progress, in_order
 from .text_norm import normalize
 
 log = logging.getLogger(__name__)
@@ -258,13 +258,13 @@ def run(
     def ask(win: tuple) -> dict:
         return client.extract(header + win[1], guided_json_schema=schema)
 
-    for idx, (page_nos, _ctx), raw, err in in_order(ask, windows, s.extractor_concurrency):
-        w = idx + 1
+    prog = Progress(len(windows))
+    for _idx, (page_nos, _ctx), raw, err in in_order(ask, windows, s.extractor_concurrency):
         task = f"enumerate:{list_field_path}:pagine {page_nos[0]}-{page_nos[-1]}"
         if err is not None:
             # una finestra fallita non ferma il documento, ma non passa in
             # silenzio: task fallito -> needs_review (niente done)
-            log.error("Enumerate %s fallita: %s", task, err)
+            log.error("Enumerate %s [%s] FALLITA: %s", task, prog.step(), err)
             db.record_task(doc_id, task, "failed", str(err), schema_name=schema_name)
             failed_windows += 1
             continue
@@ -281,9 +281,9 @@ def run(
                 continue
             items.append(item)
         if len(windows) > 1:
-            log.info("Enumerate %s: finestra %d/%d (pagine %d-%d): %d elementi",
-                     list_field_path, w, len(windows), page_nos[0], page_nos[-1],
-                     len(items) - n_before)
+            log.info("Enumerate %s [%s]: pagine %d-%d: %d elementi (%d in totale)",
+                     list_field_path, prog.step(), page_nos[0], page_nos[-1],
+                     len(items) - n_before, len(items))
 
     if failed_windows:
         log.error("Enumerate %s: %d/%d finestre fallite -> needs_review",

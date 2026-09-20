@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
-from .parallel import in_order
+from .parallel import Progress, in_order
 from .schema import (
     _list_inner_type,
     field_anchors,
@@ -406,11 +406,12 @@ def run(
     # I task sono indipendenti: fino a `extractor_concurrency` in volo. I
     # risultati tornano in ordine, quindi le scritture su SQLite restano
     # seriali e nell'ordine di prima.
+    prog = Progress(len(todo))
     for _i, task, raw, err in in_order(ask, todo, s.extractor_concurrency):
         if err is not None:
             # esito del task persistito: un fallimento non è mai "campo assente"
             db.record_task(doc_id, task.name, "failed", str(err), schema_name=name)
-            log.error("Task %s fallito: %s", task.name, err)
+            log.error("Task %s [%s] FALLITO: %s", task.name, prog.step(), err)
             failed = True
             continue
         # Per i task di elemento lista il modello risponde con lo schema intero:
@@ -456,7 +457,7 @@ def run(
                 schema_name=name,
             )
         db.record_task(doc_id, task.name, "ok", schema_name=name)
-        log.info("Task %s: %d campi estratti", task.name, len(rows))
+        log.info("Task %s [%s]: %d campi estratti", task.name, prog.step(), len(rows))
 
     if failed:
         # nessun avanzamento implicito: i task falliti restano visibili

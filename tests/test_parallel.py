@@ -61,3 +61,28 @@ def test_single_worker_stays_sequential():
 
 def test_empty_input():
     assert list(in_order(lambda x: x, [], 8)) == []
+
+
+def test_progress_reports_share_elapsed_and_eta():
+    """Una fase lunga scriveva una riga per unità di lavoro e basta: con 46
+    finestre si conta a mano, con 400 task di estrazione non si conta."""
+    from pipeline.parallel import Progress
+
+    p = Progress(4)
+    p.start -= 30  # simula 30 secondi già trascorsi
+    first = p.step()
+    assert first.startswith("1/4 25%")
+    assert "rimasti" in first, "senza stima del rimanente non si sa quanto manca"
+
+    for _ in range(3):
+        last = p.step()
+    assert last.startswith("4/4 100%")
+    assert "rimasti" not in last, "a lavoro finito non si stima piu' niente"
+
+
+def test_progress_formats_long_durations():
+    from pipeline.parallel import Progress
+
+    p = Progress(2)
+    p.start -= 3 * 3600 + 25 * 60
+    assert "3h25m" in p.step()

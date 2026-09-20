@@ -16,6 +16,7 @@ SQLite — resta seriale e il risultato è identico a quello sequenziale.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, TypeVar
@@ -57,4 +58,38 @@ def in_order(
                 yield i, it, None, e
 
 
-__all__ = ["in_order"]
+def _hms(seconds: float) -> str:
+    seconds = int(max(0, seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+
+
+class Progress:
+    """Avanzamento per i log: `12/46 26% · 3m12s · ~8m40s rimasti`.
+
+    Serve perché una fase lunga scrive una riga per unità di lavoro e basta:
+    con 46 finestre si conta a mano, con 400 task di estrazione non si conta
+    affatto. La stima del rimanente è la media dei completati finora — con le
+    richieste in parallelo le prime unità sembrano lente (si attende che il
+    primo lotto si riempia), quindi all'inizio sovrastima.
+    """
+
+    def __init__(self, total: int):
+        self.total = total
+        self.done = 0
+        self.start = time.monotonic()
+
+    def step(self) -> str:
+        self.done += 1
+        elapsed = time.monotonic() - self.start
+        pct = 100 * self.done / self.total if self.total else 100
+        out = f"{self.done}/{self.total} {pct:.0f}% · {_hms(elapsed)}"
+        if self.done < self.total and self.done:
+            out += f" · ~{_hms(elapsed / self.done * (self.total - self.done))} rimasti"
+        return out
+
+
+__all__ = ["in_order", "Progress"]
