@@ -103,6 +103,43 @@ def _page_windows(
     return windows
 
 
+def _page_blocks(
+    db: DB, doc_id: str, pages, budget: float, size: Callable[[str], float]
+) -> list[tuple[int, str]]:
+    """Un blocco per pagina, o PIU` blocchi se la pagina da sola sfora il budget.
+
+    `_page_windows` manda in finestra da sola una pagina più grande del budget,
+    e la manda intera: la richiesta viene rifiutata con un 400 e la pagina è
+    persa. Nel Player's Handbook succede alle quattro pagine dell'indice
+    analitico, che hanno 210-244 regioni minuscole l'una — lì non c'è niente da
+    estrarre, ma su una pagina densa che conta il dato sparirebbe.
+
+    Spezzare ai confini delle regioni la conserva: ogni pezzo ripete
+    l'intestazione, così il modello sa sempre di che pagina sta leggendo.
+    """
+    head = ["", "REGIONI (id | tipo | testo):"]
+    out: list[tuple[int, str]] = []
+    for p in pages:
+        n = p["page_no"]
+        head[0] = f"=== PAGE {n} ==="
+        base = size("\n".join(head))
+        chunk: list[str] = []
+        total = base
+        for r in db.get_canonical_regions(doc_id, n):
+            row = f"[{r['region_id']}] {r['region_type']}: {r['text']}"
+            rsize = size(row) + 1
+            if chunk and total + rsize > budget:
+                out.append((n, "\n".join(head + chunk)))
+                chunk, total = [], base
+            if base + rsize > budget:
+                log.warning("Regione %s di p.%d da sola supera il budget della "
+                            "finestra: la richiesta verrà rifiutata", r["region_id"], n)
+            chunk.append(row)
+            total += rsize
+        out.append((n, "\n".join(head + chunk)))
+    return out
+
+
 def _check_item(db: DB, doc_id: str, it: dict, window_pages: list[int]) -> ListItem | None:
     """Valida un elemento dell'inventario contro il testo OCR."""
     anchor = it.get("anchor", "")
@@ -202,12 +239,6 @@ def run(
     # gli ID visibili il modello non può selezionare region_ids in modo
     # affidabile (inventerebbe numeri plausibili).
     pages = db.get_pages(doc_id)
-    page_blocks = []
-    for p in pages:
-        lines = [f"=== PAGE {p['page_no']} ===", "REGIONI (id | tipo | testo):"]
-        for r in db.get_canonical_regions(doc_id, p["page_no"]):
-            lines.append(f"[{r['region_id']}] {r['region_type']}: {r['text']}")
-        page_blocks.append((p["page_no"], "\n".join(lines)))
     count = token_counter(s.extractor_model)
     # contesto dell'estrattore - risposta - istruzioni - margine
     # La riserva copre le istruzioni del prompt PIU` il template di chat, che
@@ -216,7 +247,7 @@ def run(
     # (5121 + 3072 = 8193 contro 8192) e quattro finestre venivano perse.
     budget = (s.enumerate_window_tokens or
               s.extractor_max_model_len - s.extractor_max_tokens - 1280)
-    windows = _page_windows(page_blocks, budget, count)
+    windows = _page_windows(_page_blocks(db, doc_id, pages, budget, count), budget, count)
 
     what = f" ({description})" if description else ""
     header = (

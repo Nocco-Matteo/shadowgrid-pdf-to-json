@@ -60,7 +60,12 @@ extractor_max_model_len: 8192
 # fallite e il motore morto (EngineDeadError) alla prima estrazione delle
 # capacita' di classe. xgrammar costruisce l'automa dallo schema senza passare
 # da una regex.
-extractor_vllm_args: ["--structured-outputs-config.backend", "xgrammar"]
+# xgrammar rifiuta lo schema ("contains features not supported"): la
+# tassonomia featureEffect e` un oneOf a 25 rami e le bbox usano prefixItems.
+# 'auto' sceglieva un backend a regex che lo accettava ma impiegava piu` di 5
+# secondi a compilarlo, uccidendo il motore. guidance li regge entrambi —
+# verificato con una richiesta reale prima di lanciarne 476.
+extractor_vllm_args: ["--structured-outputs-config.backend", "guidance"]
 
 # --- Estrazione ---
 # Token massimi di risposta. 2048 tronca l'inventario della Fase 4 sui
