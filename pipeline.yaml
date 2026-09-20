@@ -41,7 +41,14 @@ extractor_url: "http://127.0.0.1:8080/v1"
 # conflict_rate_warn: 0.05
 
 # --- Server vLLM dell'estrattore (limiti VRAM, RTX 4090 24GB in WSL) ---
-# extractor_max_model_len: 16384          # contesto massimo (prompt + risposta)
+# Contesto massimo (prompt + risposta). Governa anche la CONCORRENZA reale:
+# vLLM prenota max_model_len token di cache KV per richiesta, quindi le
+# richieste simultanee sono cache_KV / max_model_len. Con i pesi AWQ da 18,8 GB
+# restano 2,6 GiB di cache = 36.864 token, cioe` 2,25 richieste a 16384 e 4,5 a
+# 8192 — misurato, non stimato: vLLM lo scrive all'avvio ("Maximum concurrency
+# for N tokens per request"). Finestre piu` piccole ma piu` numerose: i token
+# decodificati totali non cambiano, e il decode e` cio` che domina.
+extractor_max_model_len: 8192
 # extractor_max_num_batched_tokens: 2048  # picco attivazioni in prefill
 # extractor_gpu_memory_utilization: 0.93  # > ~0.935 in WSL: vLLM non parte
 # extractor_enforce_eager: true           # niente CUDA graph (più VRAM per la KV)
@@ -55,7 +62,7 @@ extractor_url: "http://127.0.0.1:8080/v1"
 # tagliata a meta` di un region_ids e la finestra e' andata persa. Il
 # budget di una finestra e` max_model_len - questo - 1024, quindi
 # alzarlo accorcia anche le finestre: meno elementi per risposta.
-extractor_max_tokens: 4096
+extractor_max_tokens: 3072
 # enumerate_window_tokens: null    # Fase 4: token per finestra (null = automatico dal contesto)
 # extractor_temperature: 0.0
 # extractor_seed: 12345
