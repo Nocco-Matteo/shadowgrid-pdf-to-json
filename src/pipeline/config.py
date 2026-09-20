@@ -78,13 +78,13 @@ class Settings(BaseSettings):
     # risparmia ~0.8GB di pesi e il profiling delle immagini. Da disattivare
     # se un giorno l'estrattore riceve images_b64.
     extractor_text_only: bool = True
-    extractor_max_num_seqs: int = 8
+    extractor_max_num_seqs: int = 16
     # Richieste in volo dal CLIENT. Le fasi mandavano una richiesta per volta a
     # un server da 8 posti: a flusso singolo un 27B sta sui 18 token/s perche'
     # per ogni token rilegge tutti i pesi, mentre in batch quel costo si
     # ammortizza. Non ha senso superare extractor_max_num_seqs: il resto
     # verrebbe accodato dal server.
-    extractor_concurrency: int = 8
+    extractor_concurrency: int = 16
     extractor_vllm_args: list[str] = Field(default_factory=list)
 
     # Rasterizzazione

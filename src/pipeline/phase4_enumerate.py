@@ -210,8 +210,12 @@ def run(
         page_blocks.append((p["page_no"], "\n".join(lines)))
     count = token_counter(s.extractor_model)
     # contesto dell'estrattore - risposta - istruzioni - margine
+    # La riserva copre le istruzioni del prompt PIU` il template di chat, che
+    # aggiunge token che nessuna stima sul testo vede: con riserva 1024 le
+    # pagine dell'indice del Player's Handbook sforavano di UN token
+    # (5121 + 3072 = 8193 contro 8192) e quattro finestre venivano perse.
     budget = (s.enumerate_window_tokens or
-              s.extractor_max_model_len - s.extractor_max_tokens - 1024)
+              s.extractor_max_model_len - s.extractor_max_tokens - 1280)
     windows = _page_windows(page_blocks, budget, count)
 
     what = f" ({description})" if description else ""

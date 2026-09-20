@@ -29,9 +29,12 @@ def _flag(args, name):
 
 def test_start_extractor_passes_memory_limits(monkeypatch, tmp_path):
     calls = _capture(monkeypatch, tmp_path)
+    # valori espliciti: il test verifica il passaggio dei parametri, non i
+    # default, che cambiano quando si rimisura la concorrenza
     s = Settings(extractor_model="org/Estrattore", extractor_max_model_len=8192,
                  extractor_max_num_batched_tokens=2048,
                  extractor_gpu_memory_utilization=0.9,
+                 extractor_max_num_seqs=8,
                  extractor_vllm_args=["--enforce-eager"])
     url = vllm_runner.VLLMRunner(s).start_extractor(port=8080, phase="extract")
     args = calls[0]
