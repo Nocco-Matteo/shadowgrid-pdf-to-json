@@ -1,0 +1,1705 @@
+{
+  "features": [
+    {
+      "_id_curato": "barbarian_extra_attack",
+      "_anchor": "EXTRA ATTACK",
+      "_page": 43,
+      "className": {
+        "value": "Barbarian"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Extra Attack"
+      },
+      "grantedAtLevel": {
+        "value": 5
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_attack",
+            "byLevel": {
+              "5": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "barbarian_fast_movement",
+      "_anchor": "FAST MOVEMENT",
+      "_page": 43,
+      "className": {
+        "value": "Barbarian"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Fast Movement"
+      },
+      "grantedAtLevel": {
+        "value": 5
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "speed_bonus",
+            "byLevel": {
+              "5": 10
+            },
+            "condition": "no_heavy_armor"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "barbarian_primal_champion",
+      "_anchor": "PRIMAL CHAMPION",
+      "_page": 43,
+      "className": {
+        "value": "Barbarian"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Primal Champion"
+      },
+      "grantedAtLevel": {
+        "value": 20
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "ability_score_bonus",
+            "abilities": [
+              "str",
+              "con"
+            ],
+            "amount": 4,
+            "maximum": 24
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "barbarian_rage",
+      "_anchor": "RAGE",
+      "_page": 42,
+      "className": {
+        "value": "Barbarian"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Rage"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "damage_bonus",
+            "byLevel": {
+              "1": 2,
+              "9": 3,
+              "16": 4
+            },
+            "weaponFilter": "melee_strength",
+            "condition": "while_active"
+          },
+          {
+            "kind": "resistance",
+            "damageTypes": [
+              "bludgeoning",
+              "piercing",
+              "slashing"
+            ],
+            "condition": "while_active"
+          },
+          {
+            "kind": "resource_cost",
+            "resourceId": "rage",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "barbarian_unarmored_defense",
+      "_anchor": "UNARMORED DEFENSE",
+      "_page": 42,
+      "className": {
+        "value": "Barbarian"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Unarmored Defense"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "ac_formula",
+            "base": 10,
+            "abilities": [
+              "dex",
+              "con"
+            ],
+            "condition": "unarmored"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "bard_college_of_lore_peerless_skill",
+      "_anchor": "PEERLESS SKILL",
+      "_page": 49,
+      "className": {
+        "value": "Bard"
+      },
+      "subclassName": {
+        "value": "College of Lore"
+      },
+      "featureName": {
+        "value": "Peerless Skill"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "bardic_inspiration",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "bard_jack_of_all_trades",
+      "_anchor": "JACK OF ALL TRADES",
+      "_page": 48,
+      "className": {
+        "value": "Bard"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Jack of All Trades"
+      },
+      "grantedAtLevel": {
+        "value": 2
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "check_modifier",
+            "halfProficiency": true,
+            "appliesTo": "non_proficient"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "bard_valor_extra_attack",
+      "_anchor": "EXTRA ATTACK",
+      "_page": 49,
+      "className": {
+        "value": "Bard"
+      },
+      "subclassName": {
+        "value": "College of Valor"
+      },
+      "featureName": {
+        "value": "Extra Attack"
+      },
+      "grantedAtLevel": {
+        "value": 6
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_attack",
+            "byLevel": {
+              "6": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "cleric_knowledge_potent_spellcasting",
+      "_anchor": "POTENT SPELLCASTING",
+      "_page": 54,
+      "className": {
+        "value": "Cleric"
+      },
+      "subclassName": {
+        "value": "Knowledge Domain"
+      },
+      "featureName": {
+        "value": "Potent Spellcasting"
+      },
+      "grantedAtLevel": {
+        "value": 8
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "spell_damage_bonus",
+            "fromAbilityModifier": "wis",
+            "appliesTo": "cantrips"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "cleric_life_divine_strike",
+      "_anchor": "DIVINE STRIKE",
+      "_page": 54,
+      "className": {
+        "value": "Cleric"
+      },
+      "subclassName": {
+        "value": "Life Domain"
+      },
+      "featureName": {
+        "value": "Divine Strike"
+      },
+      "grantedAtLevel": {
+        "value": 8
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_damage_dice",
+            "byLevel": {
+              "8": "1d8",
+              "14": "2d8"
+            },
+            "weaponFilter": "any"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "cleric_light_potent_spellcasting",
+      "_anchor": "POTENT SPELLCASTING",
+      "_page": 55,
+      "className": {
+        "value": "Cleric"
+      },
+      "subclassName": {
+        "value": "Light Domain"
+      },
+      "featureName": {
+        "value": "Potent Spellcasting"
+      },
+      "grantedAtLevel": {
+        "value": 8
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "spell_damage_bonus",
+            "fromAbilityModifier": "wis",
+            "appliesTo": "cantrips"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "cleric_nature_divine_strike",
+      "_anchor": "DIVINE STRIKE",
+      "_page": 56,
+      "className": {
+        "value": "Cleric"
+      },
+      "subclassName": {
+        "value": "Nature Domain"
+      },
+      "featureName": {
+        "value": "Divine Strike"
+      },
+      "grantedAtLevel": {
+        "value": 8
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_damage_dice",
+            "byLevel": {
+              "8": "1d8",
+              "14": "2d8"
+            },
+            "weaponFilter": "any"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "cleric_tempest_divine_strike",
+      "_anchor": "DIVINE STRIKE",
+      "_page": 56,
+      "className": {
+        "value": "Cleric"
+      },
+      "subclassName": {
+        "value": "Tempest Domain"
+      },
+      "featureName": {
+        "value": "Divine Strike"
+      },
+      "grantedAtLevel": {
+        "value": 8
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_damage_dice",
+            "byLevel": {
+              "8": "1d8",
+              "14": "2d8"
+            },
+            "weaponFilter": "any"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "cleric_trickery_divine_strike",
+      "_anchor": "DIVINE STRIKE",
+      "_page": 57,
+      "className": {
+        "value": "Cleric"
+      },
+      "subclassName": {
+        "value": "Trickery Domain"
+      },
+      "featureName": {
+        "value": "Divine Strike"
+      },
+      "grantedAtLevel": {
+        "value": 8
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_damage_dice",
+            "byLevel": {
+              "8": "1d8",
+              "14": "2d8"
+            },
+            "weaponFilter": "any"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "cleric_war_domain_divine_strike",
+      "_anchor": "DIVINE STRIKE",
+      "_page": 57,
+      "className": {
+        "value": "Cleric"
+      },
+      "subclassName": {
+        "value": "War Domain"
+      },
+      "featureName": {
+        "value": "Divine Strike"
+      },
+      "grantedAtLevel": {
+        "value": 8
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_damage_dice",
+            "byLevel": {
+              "8": "1d8",
+              "14": "2d8"
+            },
+            "weaponFilter": "any"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "druid_circle_of_the_moon_elemental_wild_shape",
+      "_anchor": "ELEMENTAL Wild Shape",
+      "_page": 63,
+      "className": {
+        "value": "Druid"
+      },
+      "subclassName": {
+        "value": "Circle of the Moon"
+      },
+      "featureName": {
+        "value": "Elemental Wild Shape"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "wild_shape",
+            "amount": 2
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "fighter_champion_remarkable_athlete",
+      "_anchor": "REMARKABLE ATHLETE",
+      "_page": 66,
+      "className": {
+        "value": "Fighter"
+      },
+      "subclassName": {
+        "value": "Champion"
+      },
+      "featureName": {
+        "value": "Remarkable Athlete"
+      },
+      "grantedAtLevel": {
+        "value": 7
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "check_modifier",
+            "halfProficiency": true,
+            "appliesTo": "non_proficient",
+            "abilities": [
+              "str",
+              "dex",
+              "con"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "fighter_extra_attack",
+      "_anchor": "EXTRA ATTACK",
+      "_page": 66,
+      "className": {
+        "value": "Fighter"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Extra Attack"
+      },
+      "grantedAtLevel": {
+        "value": 5
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_attack",
+            "byLevel": {
+              "5": 2,
+              "11": 3,
+              "20": 4
+            }
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "fighting_style_archery",
+      "_anchor": "ARCHERY",
+      "_page": 85,
+      "className": {
+        "value": "*"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Archery"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "attack_bonus",
+            "amount": 2,
+            "weaponFilter": "ranged"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_deflect_missiles",
+      "_anchor": "DEFLECT MISSILES",
+      "_page": 72,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Deflect Missiles"
+      },
+      "grantedAtLevel": {
+        "value": 3
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_diamond_soul",
+      "_anchor": "DIAMOND SOUL",
+      "_page": 73,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Diamond Soul"
+      },
+      "grantedAtLevel": {
+        "value": 14
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_elemental_discipline_fangs_of_the_fire_snake",
+      "_anchor": "Fangs of the Fire Snake",
+      "_page": 75,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": "Way of the Four Elements"
+      },
+      "featureName": {
+        "value": "Fangs of the Fire Snake"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_elemental_discipline_fist_of_four_thunders",
+      "_anchor": "Fist of Four Thunders",
+      "_page": 75,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": "Way of the Four Elements"
+      },
+      "featureName": {
+        "value": "Fist of Four Thunders"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 2
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_elemental_discipline_rush_of_the_gale_spirits",
+      "_anchor": "Rush of the Gale Spirits",
+      "_page": 75,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": "Way of the Four Elements"
+      },
+      "featureName": {
+        "value": "Rush of the Gale Spirits"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 2
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_elemental_discipline_shape_the_flowing_river",
+      "_anchor": "Shape the Flowing River",
+      "_page": 75,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": "Way of the Four Elements"
+      },
+      "featureName": {
+        "value": "Shape the Flowing River"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_elemental_discipline_sweeping_cinder_strike",
+      "_anchor": "Sweeping Cinder Strike",
+      "_page": 75,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": "Way of the Four Elements"
+      },
+      "featureName": {
+        "value": "Sweeping Cinder Strike"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 2
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_elemental_discipline_water_whip",
+      "_anchor": "Water Whip",
+      "_page": 75,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": "Way of the Four Elements"
+      },
+      "featureName": {
+        "value": "Water Whip"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 2
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_empty_body",
+      "_anchor": "EMPTY BODY",
+      "_page": 73,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Empty Body"
+      },
+      "grantedAtLevel": {
+        "value": 18
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 4
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_evasion",
+      "_anchor": "EVASION",
+      "_page": 73,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Evasion"
+      },
+      "grantedAtLevel": {
+        "value": 7
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "save_evasion",
+            "ability": "dex"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_extra_attack",
+      "_anchor": "EXTRA ATTACK",
+      "_page": 73,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Extra Attack"
+      },
+      "grantedAtLevel": {
+        "value": 5
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_attack",
+            "byLevel": {
+              "5": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_flurry_of_blows",
+      "_anchor": "FLURRY OF BLOWS",
+      "_page": 72,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Flurry of Blows"
+      },
+      "grantedAtLevel": {
+        "value": 2
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_martial_arts",
+      "_anchor": "MARTIAL ARTS",
+      "_page": 72,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Martial Arts"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "ability_substitution",
+            "from": "str",
+            "to": "dex",
+            "applies": [
+              "attack",
+              "damage"
+            ],
+            "weaponFilter": "monk_weapon_or_unarmed",
+            "condition": "unarmored_no_shield"
+          },
+          {
+            "kind": "damage_die",
+            "byLevel": {
+              "1": 4,
+              "5": 6,
+              "11": 8,
+              "17": 10
+            },
+            "weaponFilter": "monk_weapon_or_unarmed",
+            "condition": "unarmored_no_shield"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_open_hand_quivering_palm",
+      "_anchor": "QUIVERING PALM",
+      "_page": 74,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": "Way of the Open Hand"
+      },
+      "featureName": {
+        "value": "Quivering Palm"
+      },
+      "grantedAtLevel": {
+        "value": 17
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 3
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_patient_defense",
+      "_anchor": "PATIENT DEFENSE",
+      "_page": 72,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Patient Defense"
+      },
+      "grantedAtLevel": {
+        "value": 2
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_step_of_the_wind",
+      "_anchor": "STEP OF THE WIND",
+      "_page": 72,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Step of the Wind"
+      },
+      "grantedAtLevel": {
+        "value": 2
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_stunning_strike",
+      "_anchor": "STUNNING STRIKE",
+      "_page": 73,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Stunning Strike"
+      },
+      "grantedAtLevel": {
+        "value": 5
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "ki",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_unarmored_defense",
+      "_anchor": "UNARMORED DEFENSE",
+      "_page": 72,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Unarmored Defense"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "ac_formula",
+            "base": 10,
+            "abilities": [
+              "dex",
+              "wis"
+            ],
+            "condition": "unarmored_no_shield"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "monk_unarmored_movement",
+      "_anchor": "UNARMORED MOVEMENT",
+      "_page": 72,
+      "className": {
+        "value": "Monk"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Unarmored Movement"
+      },
+      "grantedAtLevel": {
+        "value": 2
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "speed_bonus",
+            "byLevel": {
+              "2": 10,
+              "6": 15,
+              "10": 20,
+              "14": 25,
+              "18": 30
+            },
+            "condition": "unarmored_no_shield"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "paladin_aura_of_protection",
+      "_anchor": "AURA OF PROTECTION",
+      "_page": 79,
+      "className": {
+        "value": "Paladin"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Aura of Protection"
+      },
+      "grantedAtLevel": {
+        "value": 6
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "save_bonus",
+            "fromAbilityModifier": "cha",
+            "minimum": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "paladin_extra_attack",
+      "_anchor": "EXTRA ATTACK",
+      "_page": 79,
+      "className": {
+        "value": "Paladin"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Extra Attack"
+      },
+      "grantedAtLevel": {
+        "value": 5
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_attack",
+            "byLevel": {
+              "5": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "paladin_improved_divine_smite",
+      "_anchor": "IMPROVED DIVINE SMITE",
+      "_page": 79,
+      "className": {
+        "value": "Paladin"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Improved Divine Smite"
+      },
+      "grantedAtLevel": {
+        "value": 11
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_damage_dice",
+            "byLevel": {
+              "11": "1d8"
+            },
+            "weaponFilter": "melee"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "ranger_extra_attack",
+      "_anchor": "EXTRA ATTACK",
+      "_page": 86,
+      "className": {
+        "value": "Ranger"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Extra Attack"
+      },
+      "grantedAtLevel": {
+        "value": 5
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_attack",
+            "byLevel": {
+              "5": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "rogue_evasion",
+      "_anchor": "EVASION",
+      "_page": 90,
+      "className": {
+        "value": "Rogue"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Evasion"
+      },
+      "grantedAtLevel": {
+        "value": 7
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "save_evasion",
+            "ability": "dex"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "rogue_reliable_talent",
+      "_anchor": "RELIABLE TALENT",
+      "_page": 90,
+      "className": {
+        "value": "Rogue"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Reliable Talent"
+      },
+      "grantedAtLevel": {
+        "value": 11
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "check_modifier",
+            "floor": 10,
+            "appliesTo": "proficient"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "rogue_sneak_attack",
+      "_anchor": "SNEAK ATTACK",
+      "_page": 90,
+      "className": {
+        "value": "Rogue"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Sneak Attack"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "extra_damage_dice",
+            "byLevel": {
+              "1": "1d6",
+              "3": "2d6",
+              "5": "3d6",
+              "7": "4d6",
+              "9": "5d6",
+              "11": "6d6",
+              "13": "7d6",
+              "15": "8d6",
+              "17": "9d6",
+              "19": "10d6"
+            },
+            "weaponFilter": "finesse_or_ranged"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_draconic_bloodline_draconic_presence",
+      "_anchor": "DRACONIC PRESENCE",
+      "_page": 97,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": "Draconic Bloodline"
+      },
+      "featureName": {
+        "value": "Draconic Presence"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 5
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_draconic_bloodline_elemental_affinity",
+      "_anchor": "ELEMENTAL AFFINITY",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": "Draconic Bloodline"
+      },
+      "featureName": {
+        "value": "Elemental Affinity"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_draconic_resilience",
+      "_anchor": "DRACONIC RESILIENCE",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": "Draconic Bloodline"
+      },
+      "featureName": {
+        "value": "Draconic Resilience"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "ac_formula",
+            "base": 13,
+            "abilities": [
+              "dex"
+            ],
+            "condition": "unarmored"
+          },
+          {
+            "kind": "hp_bonus_per_level",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_metamagic_careful_spell",
+      "_anchor": "CAREFUL SPELL",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Careful Spell"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_metamagic_distant_spell",
+      "_anchor": "DISTANT SPELL",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Distant Spell"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_metamagic_empowered_spell",
+      "_anchor": "EMPOWERED SPELL",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Empowered Spell"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_metamagic_extended_spell",
+      "_anchor": "EXTENDED SPELL",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Extended Spell"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_metamagic_heightened_spell",
+      "_anchor": "Heightened Spell",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Heightened Spell"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 3
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_metamagic_quickened_spell",
+      "_anchor": "QUICKENED SPELL",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Quickened Spell"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 2
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_metamagic_subtle_spell",
+      "_anchor": "SUBTLE SPELL",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Subtle Spell"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_metamagic_twinned_spell",
+      "_anchor": "TWINNED SPELL",
+      "_page": 96,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Twinned Spell"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "variableAmount": "equal to the spell's level"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "sorcerer_wild_magic_bend_luck",
+      "_anchor": "BEND LUCK",
+      "_page": 97,
+      "className": {
+        "value": "Sorcerer"
+      },
+      "subclassName": {
+        "value": "Wild Magic"
+      },
+      "featureName": {
+        "value": "Bend Luck"
+      },
+      "grantedAtLevel": {
+        "value": 1
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resource_cost",
+            "resourceId": "sorcery_points",
+            "amount": 2
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "warlock_agonizing_blast",
+      "_anchor": "AGONIZING BLAST",
+      "_page": 104,
+      "className": {
+        "value": "*"
+      },
+      "subclassName": {
+        "value": null
+      },
+      "featureName": {
+        "value": "Agonizing Blast"
+      },
+      "grantedAtLevel": {
+        "value": 2
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "spell_damage_bonus",
+            "fromAbilityModifier": "cha",
+            "appliesTo": "named_spell",
+            "spellName": "Eldritch Blast"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "wizard_evocation_empowered_evocation",
+      "_anchor": "EMPOWERED EVOCATION",
+      "_page": 111,
+      "className": {
+        "value": "Wizard"
+      },
+      "subclassName": {
+        "value": "School of Evocation"
+      },
+      "featureName": {
+        "value": "Empowered Evocation"
+      },
+      "grantedAtLevel": {
+        "value": 10
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "spell_damage_bonus",
+            "fromAbilityModifier": "int",
+            "appliesTo": "damage_type"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "barbarian_totem_warrior_bear_spirit",
+      "_anchor": "TOTEM SPIRIT",
+      "_page": 44,
+      "className": {
+        "value": "Barbarian"
+      },
+      "subclassName": {
+        "value": "Path of the Totem Warrior"
+      },
+      "featureName": {
+        "value": "Totem Spirit"
+      },
+      "grantedAtLevel": {
+        "value": 3
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "resistance",
+            "damageTypes": [
+              "acid",
+              "bludgeoning",
+              "cold",
+              "fire",
+              "force",
+              "lightning",
+              "necrotic",
+              "piercing",
+              "poison",
+              "radiant",
+              "slashing",
+              "thunder"
+            ],
+            "condition": "while_active"
+          }
+        ]
+      }
+    },
+    {
+      "_id_curato": "wizard_transmutation_transmuters_stone_pace",
+      "_anchor": "TRANSMUTER'S STONE",
+      "_page": 113,
+      "className": {
+        "value": "Wizard"
+      },
+      "subclassName": {
+        "value": "School of Transmutation"
+      },
+      "featureName": {
+        "value": "Transmuter's Stone"
+      },
+      "grantedAtLevel": {
+        "value": 6
+      },
+      "effects": {
+        "value": [
+          {
+            "kind": "speed_bonus",
+            "amount": 10
+          }
+        ]
+      }
+    }
+  ]
+}
