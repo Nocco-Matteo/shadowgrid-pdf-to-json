@@ -50,7 +50,12 @@ extractor_url: "http://127.0.0.1:8080/v1"
 # extractor_vllm_args: ["--enforce-eager"]  # argomenti extra per `vllm serve`
 
 # --- Estrazione ---
-# extractor_max_tokens: 2048       # token massimi di risposta
+# Token massimi di risposta. 2048 tronca l'inventario della Fase 4 sui
+# capitoli densi: l'enumerazione delle capacita' del Chierico e' uscita
+# tagliata a meta` di un region_ids e la finestra e' andata persa. Il
+# budget di una finestra e` max_model_len - questo - 1024, quindi
+# alzarlo accorcia anche le finestre: meno elementi per risposta.
+extractor_max_tokens: 4096
 # enumerate_window_tokens: null    # Fase 4: token per finestra (null = automatico dal contesto)
 # extractor_temperature: 0.0
 # extractor_seed: 12345
