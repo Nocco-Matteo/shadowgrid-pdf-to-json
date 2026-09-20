@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
+from .parallel import in_order
 from .schema import (
     _list_inner_type,
     field_anchors,
@@ -390,21 +391,26 @@ def run(
     page_nos = {p["page_no"] for p in db.get_pages(doc_id)}
 
     failed = False
-    for task in tasks:
-        if db.task_status(doc_id, task.name) == "ok":
-            continue  # task già completato (resume)
-        prompt = build_prompt(task)
+    # i task già completati non si rifanno (resume): si tolgono prima di
+    # mandare, non dentro il ciclo, perché ora le richieste partono insieme
+    todo = [t for t in tasks if db.task_status(doc_id, t.name) != "ok"]
+
+    def ask(task: Task) -> dict:
         # Schema dei soli campi del task, tutti obbligatori: il modello non
         # può omettere una chiave, solo dichiararne l'assenza (value=null).
         guided = guided_schema(schema_strict, task.fields,
                                single_item=task.item_field is not None)
-        try:
-            raw = client.extract(prompt, images_b64=task.images_b64,
-                                 guided_json_schema=guided)
-        except Exception as e:
+        return client.extract(build_prompt(task), images_b64=task.images_b64,
+                              guided_json_schema=guided)
+
+    # I task sono indipendenti: fino a `extractor_concurrency` in volo. I
+    # risultati tornano in ordine, quindi le scritture su SQLite restano
+    # seriali e nell'ordine di prima.
+    for _i, task, raw, err in in_order(ask, todo, s.extractor_concurrency):
+        if err is not None:
             # esito del task persistito: un fallimento non è mai "campo assente"
-            db.record_task(doc_id, task.name, "failed", str(e), schema_name=name)
-            log.error("Task %s fallito: %s", task.name, e)
+            db.record_task(doc_id, task.name, "failed", str(err), schema_name=name)
+            log.error("Task %s fallito: %s", task.name, err)
             failed = True
             continue
         # Per i task di elemento lista il modello risponde con lo schema intero:

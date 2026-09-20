@@ -31,6 +31,7 @@ from rapidfuzz.fuzz import partial_ratio
 from .config import Settings, get_settings
 from .db import DB
 from .ocr_clients import ExtractorClient
+from .parallel import in_order
 from .text_norm import normalize
 
 log = logging.getLogger(__name__)
@@ -251,15 +252,20 @@ def run(
     items: list[ListItem] = []
     kept: dict[int, list[tuple[str, tuple]]] = {}  # pagina -> (anchor, region_ids)
     failed_windows = 0
-    for w, (page_nos, context) in enumerate(windows, start=1):
+    # Le finestre sono indipendenti: si mandano al server tutte insieme, fino a
+    # `extractor_concurrency` in volo. I risultati tornano nell'ordine di
+    # partenza, quindi deduplica e scritture restano identiche al seriale.
+    def ask(win: tuple) -> dict:
+        return client.extract(header + win[1], guided_json_schema=schema)
+
+    for idx, (page_nos, _ctx), raw, err in in_order(ask, windows, s.extractor_concurrency):
+        w = idx + 1
         task = f"enumerate:{list_field_path}:pagine {page_nos[0]}-{page_nos[-1]}"
-        try:
-            raw = client.extract(header + context, guided_json_schema=schema)
-        except Exception as e:
+        if err is not None:
             # una finestra fallita non ferma il documento, ma non passa in
             # silenzio: task fallito -> needs_review (niente done)
-            log.error("Enumerate %s fallita: %s", task, e)
-            db.record_task(doc_id, task, "failed", str(e), schema_name=schema_name)
+            log.error("Enumerate %s fallita: %s", task, err)
+            db.record_task(doc_id, task, "failed", str(err), schema_name=schema_name)
             failed_windows += 1
             continue
         db.record_task(doc_id, task, "ok", schema_name=schema_name)
