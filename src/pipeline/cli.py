@@ -317,9 +317,10 @@ def cmd_reset_extraction(args) -> None:
     # classe già estratte dalle stesse pagine.
     name = None if args.all_schemas else _schema_name(_schema(args))
     for doc_id in _resolve_doc_ids(args, db):
-        db.reset_extraction(doc_id, schema_name=name)
-        log.info("Estrazione azzerata per %s (%s): stato reconciled, OCR conservato",
-                 doc_id, name or "TUTTI gli envelope")
+        db.reset_extraction(doc_id, schema_name=name, keep_inventory=args.keep_inventory)
+        log.info("Estrazione azzerata per %s (%s): stato reconciled, OCR%s conservato",
+                 doc_id, name or "TUTTI gli envelope",
+                 " e inventario" if args.keep_inventory else "")
 
 
 def cmd_export(args) -> None:
@@ -427,6 +428,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_targets(sp)
     sp.add_argument("--all-schemas", action="store_true",
                     help="azzera TUTTI gli envelope del documento, non solo --schema")
+    sp.add_argument("--keep-inventory", action="store_true",
+                    help="conserva il risultato della Fase 4: rifa' solo l'estrazione, "
+                         "senza ripagare l'enumerazione")
     sp.set_defaults(func=cmd_reset_extraction)
 
     sp = sub.add_parser("export", help="scrive il seed del compendium dagli elementi validati")

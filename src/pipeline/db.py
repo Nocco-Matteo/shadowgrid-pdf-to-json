@@ -252,26 +252,34 @@ class DB:
         with self.tx() as cur:
             cur.execute("UPDATE documents SET status=? WHERE doc_id=?", (dst, doc_id))
 
-    def reset_extraction(self, doc_id: str, schema_name: str | None = None) -> None:
+    def reset_extraction(self, doc_id: str, schema_name: str | None = None,
+                         keep_inventory: bool = False) -> None:
         """Cancella inventari, estrazioni ed esiti dei task e riporta
         l'estrazione a `reconciled`, senza rifare rasterizzazione e OCR.
 
         Con `schema_name` azzera SOLO quell'envelope: gli altri estratti dallo
-        stesso manuale restano dove sono. Senza, azzera tutto il documento."""
+        stesso manuale restano dove sono. Senza, azzera tutto il documento.
+
+        `keep_inventory` conserva il risultato della Fase 4 (le righe
+        `<campo>$inventory` e i task `enumerate:*`) e cancella solo le
+        estrazioni: serve a rifare la Fase 5 dopo un guasto senza ripagare
+        l'enumerazione, che su un manuale intero sono quindici minuti di GPU."""
         st = self.get_status(doc_id)
         if st not in _OCR_DONE:
             raise ValueError(f"Reset estrazione: {doc_id} in stato {st}, OCR non completato")
         with self.tx() as cur:
+            keep_e = " AND field_path NOT LIKE '%$inventory'" if keep_inventory else ""
+            keep_t = " AND task_name NOT LIKE 'enumerate:%'" if keep_inventory else ""
             if schema_name:
-                cur.execute("DELETE FROM extractions WHERE doc_id=? AND schema_name=?",
+                cur.execute("DELETE FROM extractions WHERE doc_id=? AND schema_name=?" + keep_e,
                             (doc_id, schema_name))
-                cur.execute("DELETE FROM tasks WHERE doc_id=? AND schema_name=?",
+                cur.execute("DELETE FROM tasks WHERE doc_id=? AND schema_name=?" + keep_t,
                             (doc_id, schema_name))
                 cur.execute("DELETE FROM extraction_state WHERE doc_id=? AND schema_name=?",
                             (doc_id, schema_name))
             else:
-                cur.execute("DELETE FROM extractions WHERE doc_id=?", (doc_id,))
-                cur.execute("DELETE FROM tasks WHERE doc_id=?", (doc_id,))
+                cur.execute("DELETE FROM extractions WHERE doc_id=?" + keep_e, (doc_id,))
+                cur.execute("DELETE FROM tasks WHERE doc_id=?" + keep_t, (doc_id,))
                 cur.execute("DELETE FROM extraction_state WHERE doc_id=?", (doc_id,))
             cur.execute("UPDATE documents SET status='reconciled' WHERE doc_id=? "
                         "AND status NOT IN ('ingested','rasterized','ocr_a','ocr_b','failed')",

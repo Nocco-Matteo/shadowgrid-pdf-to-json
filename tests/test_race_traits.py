@@ -218,3 +218,29 @@ def test_reset_extraction_keeps_ocr(env):
     assert db.get_status("d") == "reconciled"
     assert db.get_extractions("d") == [] and db.task_status("d", "flat_p1_0") is None
     assert len(db.get_regions("d", 1, engine="a")) == len(PAGES[1])
+
+
+def test_reset_keeps_the_inventory_when_asked(env):
+    """Rifare la Fase 5 dopo un guasto non deve ripagare l'enumerazione.
+
+    Azzerando l'envelope per ripulire 177 task falliti se n'e' andato anche
+    l'inventario di 445 capacita', che erano quindici minuti di GPU."""
+    db, s = env
+    db.upsert_extraction("d", "traits$inventory", '[{"anchor": "X", "page": 1}]',
+                         None, None, None, 1, "validated", schema_name="race_traits")
+    db.upsert_extraction("d", "traits[0].featureName", '"X"', "X", 1, None, 1,
+                         "validated", schema_name="race_traits")
+    db.record_task("d", "enumerate:traits:pagine 1-2", "ok", schema_name="race_traits")
+    db.record_task("d", "traits[0]", "failed", "guasto", schema_name="race_traits")
+    db.set_schema_status("d", "race_traits", "needs_review")
+
+    db.reset_extraction("d", schema_name="race_traits", keep_inventory=True)
+
+    left = {r["field_path"] for r in db.get_extractions("d", schema_name="race_traits")}
+    assert left == {"traits$inventory"}, "l'inventario non e' sopravvissuto"
+    assert db.task_status("d", "enumerate:traits:pagine 1-2") == "ok"
+    assert db.task_status("d", "traits[0]") is None, "il task fallito doveva sparire"
+
+    # senza il flag si azzera tutto, come prima
+    db.reset_extraction("d", schema_name="race_traits")
+    assert db.get_extractions("d", schema_name="race_traits") == []
